@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <artifactId>pcdr-grpc-server</artifactId>
+    <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-server</groupId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>PC GRPC SERVER</name>
+    <description>A microservice that provides protection.</description>
+    <packaging>jar</packaging>
+
+    <properties>
+        <start-class>com.nutanix.license.ProtectionSpringBootApplication
+        </start-class>
+        <service-parent.version>16.9.0.2187-RELEASE</service-parent.version>
+        <api.defs>16.9.0.8055-RELEASE</api.defs>
+        <grpc.version>1.37.0</grpc.version>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <org.mapstruct.version>1.4.0.Final</org.mapstruct.version>
+        <sonar.exclusions>
+
+        </sonar.exclusions>
+        <sonar.coverage.exclusions>
+        </sonar.coverage.exclusions>
+        <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+        <apache-olingo.version>4.8.0</apache-olingo.version>
+        <spring-retry.version>1.3.4</spring-retry.version>
+        <serviceability-client-proto.version>16.9.0.1710337288
+        </serviceability-client-proto.version>
+    </properties>
+
+    <modelVersion>4.0.0</modelVersion>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>
+                    com.nutanix.nutanix-core.ntnx-api.prism-service-parent
+                </groupId>
+                <artifactId>spring-boot-service-parent</artifactId>
+                <version>${service-parent.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.nutanix.nutanix-core.ntnx-api.prism-service-parent</groupId>
+                <artifactId>proto-service-parent</artifactId>
+                <version>${service-parent.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
+            <artifactId>pc-protection-grpc-java-server</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
+            <artifactId>pc-protection-grpc-springmvc-interfaces</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>error-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>auth-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>task-utils</artifactId>
+        </dependency>
+        <!--TruncateProto Utils-->
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>proto-utils</artifactId>
+            <version>16.9.0.635-RELEASE</version>
+        </dependency>
+        <!--JSON Utils-->
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>json-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-serviceability-client</groupId>
+            <artifactId>serviceability-client-proto</artifactId>
+            <version>${serviceability-client-proto.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-serviceability-client</groupId>
+            <artifactId>alerts</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
+            <artifactId>pc-protection-grpc-protobuf-mappers</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <version>2.13.1.RELEASE</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-to-slf4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.yaml</groupId>
+                    <artifactId>snakeyaml</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>1.6</version>
+        </dependency>
+
+
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.prism-common</groupId>
+            <artifactId>prism-common</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+        </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api</groupId>
+            <artifactId>prism-adapter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-util</groupId>
+            <artifactId>util</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.prism-commands</groupId>
+            <artifactId>prism-commands</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-ntnxdb</groupId>
+            <artifactId>ntnxdb-client-proto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>response-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
+            <artifactId>stats-utils</artifactId>
+        </dependency>
+
+        <!-- Zookeeper + Curator-->
+        <dependency>
+            <groupId>org.apache.zookeeper</groupId>
+            <artifactId>zookeeper</artifactId>
+            <version>3.9.2</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-client</artifactId>
+            <version>5.7.0</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>zookeeper</artifactId>
+                    <groupId>org.apache.zookeeper</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-framework</artifactId>
+            <version>5.7.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-test</artifactId>
+            <version>5.7.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.curator/curator-x-async -->
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-x-async</artifactId>
+            <version>5.7.0</version>
+        </dependency>
+
+        <!-- Map struct-->
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+            <version>${org.mapstruct.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.8.6</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Grpc-Test-Support -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-testing</artifactId>
+            <version>1.43.1</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Dependency for cluster management -->
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.clustermgmt</groupId>
+            <artifactId>clustermgmt-java-client-sdk</artifactId>
+            <version>16.2.0.99-RELEASE</version>
+        </dependency>
+
+        <!-- Prometheus integration -->
+        <!-- Adding actuator -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Adding prometheus -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/org.apache.httpcomponents/httpclient -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>4.5.12</version>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-stats</groupId>
+            <artifactId>stats-gateway-proto</artifactId>
+        </dependency>
+
+
+        <!-- Dependency for spring support for cache -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
+        <!-- Dependency for caffeine cache -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.odata</groupId>
+            <artifactId>odata-parent</artifactId>
+            <version>1.0.725-RELEASE</version>
+        </dependency>
+
+
+        <dependency>
+            <groupId>org.apache.olingo</groupId>
+            <artifactId>odata-commons-api</artifactId>
+            <version>${apache-olingo.version}</version>
+        </dependency>
+
+
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-services</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>3.19.4</version>
+        </dependency>
+
+        <!-- Dependencies for spring-retry -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+            <version>${spring-retry.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk16</artifactId>
+            <version>1.46</version>
+        </dependency>
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+        <!-- Starting with Spring Boot 2.4, JUnit 5’s vintage engine has
+        been removed from spring-boot-starter-test. If we still want to write tests using JUnit 4, we need to add the following Maven dependency:-->
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>commons-validator</groupId>
+            <artifactId>commons-validator</artifactId>
+            <version>1.9.0</version>
+        </dependency>
+        <!--Added to support socket creation -->
+        <dependency>
+            <groupId>commons-net</groupId>
+            <artifactId>commons-net</artifactId>
+            <version>3.8.0</version>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <finalName>licensing-server</finalName>
+        <plugins>
+            <!-- Spring boot plugin to create a fat executable jar
+             so that we can execute it using java -jar
+             Invoked during the package maven phase -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>2.4.4</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>exec</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.0</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>${org.mapstruct.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.8</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <distributionManagement>
+        <repository>
+            <id>${NEXUS_ID}</id>
+            <url>${NEXUS_URI}</url>
+        </repository>
+    </distributionManagement>
+</project>

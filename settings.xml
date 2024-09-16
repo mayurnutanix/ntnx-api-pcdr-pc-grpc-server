@@ -1,0 +1,66 @@
+<settings
+    xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                      https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <servers>
+        <!--Server for reads-->
+        <server>
+            <id>artifactory</id>
+            <username>${CANAVERAL_ARTIFACTORY_USERNAME}</username>
+            <password>${CANAVERAL_ARTIFACTORY_PASSWORD}</password>
+        </server>
+        <server>
+            <id>${NEXUS_ID}</id>
+            <username>${NEXUS_USER}</username>
+            <password>${NEXUS_PASSWORD}</password>
+        </server>
+    </servers>
+    <mirrors>
+        <mirror>
+            <id>artifactory</id>
+            <mirrorOf>central</mirrorOf>
+            <url>https://artifactory.dyn.nutanix.com/artifactory/canaveral-legacy-maven-public</url>
+        </mirror>
+    </mirrors>
+    <profiles>
+        <!--Default Profile that will activate Artifactory Reads-->
+        <profile>
+            <id>artifactory-profile</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <repositories>
+                <repository>
+                    <id>artifactory</id>
+                    <name>Artifactory Public Maven repository</name>
+                    <url>
+                        https://artifactory.dyn.nutanix.com/artifactory/canaveral-legacy-maven-public
+                    </url>
+                    <releases>
+                        <enabled>true</enabled>
+                    </releases>
+                    <snapshots>
+                        <enabled>false</enabled>
+                    </snapshots>
+                </repository>
+            </repositories>
+            <pluginRepositories>
+                <pluginRepository>
+                    <id>artifactory</id>
+                    <name>Artifactory Public Maven repository</name>
+                    <url>
+                        https://artifactory.dyn.nutanix.com/artifactory/canaveral-legacy-maven-public
+                    </url>
+                </pluginRepository>
+                <pluginRepository>
+                    <id>artifactory-local</id>
+                    <name>Artifactory Local Maven repository</name>
+                    <url>
+                        https://artifactory.dyn.nutanix.com/artifactory/jenkins-maven-local
+                    </url>
+                </pluginRepository>
+            </pluginRepositories>
+        </profile>
+    </profiles>
+</settings>
