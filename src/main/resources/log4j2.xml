@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+
+  <!-- Logging Properties -->
+  <Properties>
+    <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss,SSS'Z'}{GMT} %p [%t] [%X{X-B3-TraceId},%X{X-B3-SpanId}] %C{1}:%M:%L  %m%n</Property>
+    <Property name="LOG_DIRECTORY">/home/nutanix/backup-service/logs</Property>
+  </Properties>
+
+  <Appenders>
+    <!-- Console Appender -->
+    <Console name="Console" target="SYSTEM_OUT" follow="true">
+      <PatternLayout pattern="${LOG_PATTERN}"/>
+    </Console>
+    <!--Rolling File Appender -->
+    <RollingFile name="File" fileName="${LOG_DIRECTORY}/pcbr-service.log"
+                 filePattern="${LOG_DIRECTORY}/prism-pcbr-%i.log.gz">
+      <PatternLayout pattern="${LOG_PATTERN}"/>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="100MB" />
+      </Policies>
+      <DefaultRolloverStrategy max="10"/>
+    </RollingFile>
+    <Async name="AsyncConsole" includeLocation="true">
+      <AppenderRef ref="Console"/>
+    </Async>
+    <Async name="AsyncFile" includeLocation="true">
+      <AppenderRef ref="File"/>
+    </Async>
+  </Appenders>
+
+  <Loggers>
+    <Logger name="org.springframework.boot" level="info">
+      <AppenderRef ref="AsyncFile"/>
+      <AppenderRef ref="AsyncConsole"/>
+    </Logger>
+    <Root level="info">
+      <AppenderRef ref="AsyncFile"/>
+    </Root>
+  </Loggers>
+
+</Configuration>

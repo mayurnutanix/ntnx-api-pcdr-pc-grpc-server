@@ -1,0 +1,12 @@
+grpc.server.port: 8555
+
+spring:
+  application:
+    name: Prism Central Backup Service
+  main:
+    web-application-type: none
+  sleuth:
+    opentracing:
+      enabled: true
+logging:
+  config: /home/nutanix/backup-service/config/log4j2.xml

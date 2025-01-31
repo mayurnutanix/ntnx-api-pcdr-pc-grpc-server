@@ -5,7 +5,7 @@
 
     <artifactId>pcdr-grpc-server</artifactId>
     <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-server</groupId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>17.0.0-SNAPSHOT</version>
     <name>PC GRPC SERVER</name>
     <description>A microservice that provides protection.</description>
     <packaging>jar</packaging>
@@ -13,9 +13,11 @@
     <properties>
         <start-class>com.nutanix.license.ProtectionSpringBootApplication
         </start-class>
-        <service-parent.version>16.9.0.2187-RELEASE</service-parent.version>
-        <api.defs>16.9.0.8055-RELEASE</api.defs>
+        <service-parent.version>17.0.0-SNAPSHOT</service-parent.version>
+        <pcdr.common.version>17.0.0.1194-RELEASE</pcdr.common.version>
+        <pcdr.pe.version>17.0.0.1925-RELEASE</pcdr.pe.version>
         <grpc.version>1.37.0</grpc.version>
+        <lcm-api.version>17.0.0.1833-RELEASE</lcm-api.version>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <org.mapstruct.version>1.4.0.Final</org.mapstruct.version>
@@ -57,22 +59,22 @@
         <dependency>
             <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
             <artifactId>pc-protection-grpc-java-server</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-            </exclusions>
+            <version>17.0.0-SNAPSHOT</version>
+<!--            <exclusions>-->
+<!--                <exclusion>-->
+<!--                    <groupId>org.slf4j</groupId>-->
+<!--                    <artifactId>slf4j-log4j12</artifactId>-->
+<!--                </exclusion>-->
+<!--                <exclusion>-->
+<!--                    <groupId>log4j</groupId>-->
+<!--                    <artifactId>log4j</artifactId>-->
+<!--                </exclusion>-->
+<!--            </exclusions>-->
         </dependency>
         <dependency>
             <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
             <artifactId>pc-protection-grpc-springmvc-interfaces</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>17.0.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
@@ -86,11 +88,13 @@
             <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
             <artifactId>task-utils</artifactId>
         </dependency>
-        <!--TruncateProto Utils-->
         <dependency>
-            <groupId>com.nutanix.nutanix-core.ntnx-api.utils</groupId>
-            <artifactId>proto-utils</artifactId>
-            <version>16.9.0.635-RELEASE</version>
+            <groupId>com.nutanix.nutanix-core.aos.atlas-client</groupId>
+            <artifactId>atlas-client-proto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.aos-ntnxdb</groupId>
+            <artifactId>ntnxdb-client-proto</artifactId>
         </dependency>
         <!--JSON Utils-->
         <dependency>
@@ -107,9 +111,19 @@
             <artifactId>alerts</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.lcm</groupId>
+            <artifactId>lcm-java-dto-definitions</artifactId>
+            <version>${lcm-api.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.lcm</groupId>
+            <artifactId>lcm-java-client-sdk</artifactId>
+            <version>${lcm-api.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pc-grpc</groupId>
             <artifactId>pc-protection-grpc-protobuf-mappers</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>17.0.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>net.devh</groupId>
@@ -126,6 +140,56 @@
             <artifactId>grpc-protobuf</artifactId>
             <version>${grpc.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-web</artifactId>
+            <version>2.17.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.lmax</groupId>
+            <artifactId>disruptor</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-log4j2</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-jul</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.17.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>2.17.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j-impl</artifactId>
+            <version>2.17.1</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
@@ -142,6 +206,14 @@
                     <groupId>org.yaml</groupId>
                     <artifactId>snakeyaml</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -154,6 +226,10 @@
             <artifactId>re2j</artifactId>
             <version>1.6</version>
         </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+        </dependency>
 
 
         <dependency>
@@ -165,6 +241,18 @@
                     <artifactId>commons-logging</artifactId>
                 </exclusion>
         </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-pe</groupId>
+            <artifactId>pc-recovery-java-client-sdk</artifactId>
+            <version>${pcdr.pe.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.nutanix.nutanix-core.ntnx-api.pcdr-common</groupId>
+            <artifactId>pcdr-common-util</artifactId>
+            <version>${pcdr.common.version}</version>
         </dependency>
 
         <dependency>
@@ -215,6 +303,18 @@
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -285,6 +385,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+            <exclusions>
+                <exclusion>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                    <groupId>org.springframework.boot</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Adding prometheus -->
@@ -389,7 +495,7 @@
     </dependencies>
 
     <build>
-        <finalName>licensing-server</finalName>
+        <finalName>pcbr-service</finalName>
         <plugins>
             <!-- Spring boot plugin to create a fat executable jar
              so that we can execute it using java -jar
