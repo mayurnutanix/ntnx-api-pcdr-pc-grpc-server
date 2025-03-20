@@ -4,9 +4,105 @@ spring:
   application:
     name: Prism Central Backup Service
   main:
+    allow-bean-definition-overriding: true
     web-application-type: none
+  cloud:
+    zookeeper:
+      connect-string: ${ZOOKEEPER_HOST_PORT_LIST:zk1:9876,zk2:9876,zk3:9876}
   sleuth:
     opentracing:
       enabled: true
+  profiles:
+    active: "pc"
 logging:
   config: /home/nutanix/backup-service/config/log4j2.xml
+
+zookeeper:
+  connect_string: ${ZOOKEEPER_HOST_PORT_LIST:zk1:9876,zk2:9876,zk3:9876}
+  port: 9876
+
+prism:
+  pcdr:
+    backup:
+      schedule:
+        highFrequency: 1800000
+        highFrequencyDelay: 120000
+        maxAllowedRemainingTime: 300000
+    pulse:
+      schedule:
+        frequency: 86400000
+      start:
+        delay: 120000
+    basePathForYamls: /tmp
+
+############################################
+#      nRPC Proxy Configuration            #
+############################################
+
+proxy:
+  alert:
+    host: localhost
+    port: 2014
+  atlas:
+    host: localhost
+    port: 2060
+  capacity-planning:
+    host: localhost
+    port: 2700
+  catalog:
+    host: localhost
+    port: 2007
+  clustermgmt:
+    host: localhost
+    port: 2100
+  cms:
+    host: localhost
+    port: 2104
+  ergon:
+    host: localhost
+    port: 2090
+  flow:
+    host: localhost
+    port: 2051
+  go-magneto:
+    host: localhost
+    port: 2071
+  graphql:
+    host: localhost
+    port: 8084
+  health:
+    host: localhost
+    port: 2700
+  insights:
+    host: localhost
+    port: 2027
+  kanon:
+    host: localhost
+    port: 2077
+  magneto:
+    host: localhost
+    port: 2070
+  mantle:
+    host: localhost
+    port: 9880
+  mercury:
+    host: localhost
+    port: 9444
+  metropolis:
+    host: localhost
+    port: 2039
+  neuron:
+    host: localhost
+    port: 2800
+  polaris:
+    host: localhost
+    port: 2220
+  pollux:
+    host: localhost
+    port: 8770
+  prism-adapter:
+    host: localhost
+    port: 2019
+  uda-engine:
+    host: localhost
+    port: 2900

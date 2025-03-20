@@ -13,6 +13,7 @@ import com.nutanix.prism.pcdr.restserver.constants.TaskConstants;
 import com.nutanix.prism.pcdr.restserver.dto.RestoreInternalOpaque;
 import com.nutanix.prism.pcdr.restserver.services.api.PCVMDataService;
 import com.nutanix.prism.pcdr.restserver.util.CertFileUtil;
+import com.nutanix.prism.pcdr.restserver.util.GrpcAuthUtils;
 import com.nutanix.prism.pcdr.restserver.util.S3ServiceUtil;
 import com.nutanix.prism.pcdr.util.ErgonServiceHelper;
 import com.nutanix.prism.pcdr.util.MantleUtils;
@@ -65,7 +66,8 @@ public class PCTaskServiceHelper {
   private CertFileUtil certFileUtil;
   @Autowired
   private PCVMDataService pcvmDataService;
-
+  @Autowired
+  private GrpcAuthUtils grpcAuthUtils;
   /**
    * Creates the root task for PC restore using replica PE Ips.
    * @param replicaInfo - Replica PE Info.

@@ -39,7 +39,7 @@ public class InsightsFanoutClient extends MercuryFanoutRpcClient {
 
 
   @Autowired
-  public InsightsFanoutClient(@Qualifier("PcdrRestTemplate") RestTemplate restTemplate,
+  public InsightsFanoutClient(@Qualifier("serviceTemplate") RestTemplate restTemplate,
                               @Value("${insights.proxy.port:2027}") int insightsProxyPort) {
     super(restTemplate);
     this.setRemoteRequestUrlPathPrefix(FULL_INSIGHTS_SERVICE_NAME, insightsProxyPort);

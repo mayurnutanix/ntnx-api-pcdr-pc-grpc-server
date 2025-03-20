@@ -1,6 +1,4 @@
-package com.nutanix.prism.pcdr.restserver.converters;
-
-/**
+/*
  * Copyright (c) 2024 Nutanix Inc. All rights reserved.
  *
  * Author: shyam.sodankoor@nutanix.com
@@ -8,22 +6,32 @@ package com.nutanix.prism.pcdr.restserver.converters;
  * Adapter for Prism Central Backup Service Controller
  */
 
+package com.nutanix.prism.pcdr.restserver.converters;
+
+
+import dp1.pri.common.v1.config.IPv6Address;
+import dp1.pri.prism.v4.management.*;
+import dp1.pri.prism.v4.protectpc.*;
+import org.apache.http.conn.util.InetAddressUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.util.ObjectUtils;
+
 import com.google.common.net.InternetDomainName;
 import com.nutanix.api.utils.type.DateUtils;
 import dp1.pri.common.v1.config.FQDN;
 import dp1.pri.common.v1.config.IPAddressOrFQDN;
 import dp1.pri.common.v1.config.IPv4Address;
-import dp1.pri.common.v1.config.IPv6Address;
-import dp1.pri.prism.v4.management.*;
-import dp1.pri.prism.v4.protectpc.*;
+import dp1.pri.prism.v4.protectpc.BackupTargetsInfo;
+import dp1.pri.prism.v4.protectpc.ObjectStoreEndpointInfo;
+import dp1.pri.prism.v4.protectpc.PEInfo;
+import dp1.pri.prism.v4.protectpc.PcEndpointCredentials;
+import dp1.pri.prism.v4.protectpc.PcEndpointFlavour;
+import dp1.pri.prism.v4.protectpc.PcObjectStoreEndpoint;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.http.conn.util.InetAddressUtils;
-import org.springframework.stereotype.Service;
-import org.springframework.util.ObjectUtils;
-
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.nutanix.prism.pcdr.constants.Constants.HTTPS_OBJECTS_DEFAULT_PORT;
 import static com.nutanix.prism.pcdr.restserver.constants.Constants.DEFAULT_OBJECTSTORE_BACKUP_RETENTION_IN_DAYS;
 
 
@@ -151,19 +159,20 @@ public class PrismCentralBackupConverter {
                 pcObjectStoreEndpoint.getBucket(),
                 pcObjectStoreEndpoint.getRegion(),this.getAccessKeyCredentialsFromPcEndpointCredentials(
                 pcObjectStoreEndpoint.getEndpointCredentials()));
-        objectStore.setProviderConfig(awsS3Config);
-      } // TODO : Uncomment once NutanixObjectStore is supported
-            /* else {
-                NutanixObjectsConfig nutanixObjectsConfig = new NutanixObjectsConfig();
-                nutanixObjectsConfig.setPort(pcObjectStoreEndpoint.getPort()!=null ? Integer.parseInt(pcObjectStoreEndpoint.getPort()) : null);
-                nutanixObjectsConfig.setRegion(pcObjectStoreEndpoint.getRegion());
-                nutanixObjectsConfig.setIpAddressOrHostname(this.getIPAddressOrFQDNFromString(pcObjectStoreEndpoint.getIpAddressOrDomain()));
-                nutanixObjectsConfig.setIsTLSEnabled(!pcObjectStoreEndpoint.getSkipTLS());
-                nutanixObjectsConfig.setBucketName(pcObjectStoreEndpoint.getBucket());
-                nutanixObjectsConfig.setCredentialsInWrapper(this.getAccessKeyCredentialsFromPcEndpointCredentials(
-                    pcObjectStoreEndpoint.getEndpointCredentials()));
-                objectStore.setProviderConfig(nutanixObjectsConfig);
-            }*/
+        objectStore.setProviderConfigInWrapper(awsS3Config);
+      } else if (pcObjectStoreEndpoint.getEndpointFlavour() == PcEndpointFlavour.KOBJECTS){
+        NutanixObjectsConfig nutanixObjectsConfig = new NutanixObjectsConfig();
+        nutanixObjectsConfig.setBucketName(pcObjectStoreEndpoint.getBucket());
+        nutanixObjectsConfig.setRegion(pcObjectStoreEndpoint.getRegion());
+        ConnectionConfig connectionConfig = new ConnectionConfig();
+        connectionConfig.setIpAddressOrHostname(this.getIPAddressOrFQDNFromString(pcObjectStoreEndpoint.getIpAddressOrDomain()));
+        connectionConfig.setShouldSkipCertificateValidation(pcObjectStoreEndpoint.getSkipCertificateValidation());
+        connectionConfig.setHasCustomCertificate(pcObjectStoreEndpoint.getHasCustomCertificate());
+        nutanixObjectsConfig.setConnectionConfig(connectionConfig);
+        nutanixObjectsConfig.setCredentialsInWrapper(this.getAccessKeyCredentialsFromPcEndpointCredentials(
+                pcObjectStoreEndpoint.getEndpointCredentials()));
+        objectStore.setProviderConfigInWrapper(nutanixObjectsConfig);
+      }
       objectStore.setBackupPolicy(new BackupPolicy(pcObjectStoreEndpoint.getRpoSeconds() != null
               ? pcObjectStoreEndpoint.getRpoSeconds() / 60 : null));
     }
@@ -184,17 +193,24 @@ public class PrismCentralBackupConverter {
           pcObjectStoreEndpoint.setEndpointFlavour(PcEndpointFlavour.KS3);
           pcObjectStoreEndpoint.setEndpointCredentials(this.getPcEndpointCredentialsFromAccessKeyCredentials
                   ((AccessKeyCredentials)awss3Config.getCredentials()));
-        } // TODO : Uncomment once NutanixObjectStore is supported
-                /* else {
-                    NutanixObjectsConfig nutanixObjectsConfig = (NutanixObjectsConfig) objectStore.getProviderConfig();
-                    pcObjectStoreEndpoint.setBucket(nutanixObjectsConfig.getBucketName());
-                    pcObjectStoreEndpoint.setRegion(nutanixObjectsConfig.getRegion());
-                    pcObjectStoreEndpoint.setIpAddressOrDomain(this.getStringFromIPAddressOrFQDN(nutanixObjectsConfig.getIpAddressOrHostname()));
-                    pcObjectStoreEndpoint.setPort(nutanixObjectsConfig.getPort()!=null ? Integer.toString(nutanixObjectsConfig.getPort()) : null);
-                    pcObjectStoreEndpoint.setSkipTLS(!nutanixObjectsConfig.getIsTLSEnabled());
-                    pcObjectStoreEndpoint.setEndpointCredentials(this.getPcEndpointCredentialsFromAccessKeyCredentials
-                            ((AccessKeyCredentials) nutanixObjectsConfig.getCredentials()));
-                }*/
+        } else if (objectStore.getProviderConfig() instanceof NutanixObjectsConfig) {
+          NutanixObjectsConfig nutanixObjectsConfig = (NutanixObjectsConfig) objectStore.getProviderConfig();
+          pcObjectStoreEndpoint.setBucket(nutanixObjectsConfig.getBucketName());
+          pcObjectStoreEndpoint.setRegion(nutanixObjectsConfig.getRegion());
+          pcObjectStoreEndpoint.setEndpointFlavour(PcEndpointFlavour.KOBJECTS);
+          pcObjectStoreEndpoint.setIpAddressOrDomain(this.getStringFromIPAddressOrFQDN(
+                  nutanixObjectsConfig.getConnectionConfig().getIpAddressOrHostname()));
+          pcObjectStoreEndpoint.setPort(String.valueOf(HTTPS_OBJECTS_DEFAULT_PORT));
+          pcObjectStoreEndpoint.setSkipTLS(false);
+          pcObjectStoreEndpoint.setSkipCertificateValidation(nutanixObjectsConfig.getConnectionConfig().getShouldSkipCertificateValidation());
+          pcObjectStoreEndpoint.setEndpointCredentials(this.getPcEndpointCredentialsFromAccessKeyCredentials
+                  ((AccessKeyCredentials) nutanixObjectsConfig.getCredentials()));
+          if (!ObjectUtils.isEmpty(nutanixObjectsConfig.getConnectionConfig().getCertificate())) {
+            pcObjectStoreEndpoint.getEndpointCredentials().setCertificate(
+                    nutanixObjectsConfig.getConnectionConfig().getCertificate()
+            );
+          }
+        }
       }
 
       if (!ObjectUtils.isEmpty(objectStore.getBackupPolicy())) {

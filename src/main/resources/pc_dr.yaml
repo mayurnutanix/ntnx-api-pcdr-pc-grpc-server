@@ -1,0 +1,446 @@
+# Correct regex should be put for all the files.
+pcdr:
+  servicesToRestartAfterBasicTrust:
+    - aplos
+    - mercury
+
+  servicesToRestartAfterRestoreData:
+    - aplos
+    - mercury
+    - ergon
+    - go_ergon
+    - prism
+    - athena
+    - cassandra
+    - insights_server
+    - insights_data_transfer
+    - catalog
+
+  servicesToDisableOnStartupCMSP:
+
+#Name coming from service and is part of zknode:/appliance/logical/services_enablement_status.
+  servicesToDisableOnStartupGenesis:
+
+  portfolioServicesToReconcileAfterRestore:
+
+  maxBackupEntityCountVsAOSVersions:
+    - supportedCount: 40000
+      minVersion: 6.0
+    - supportedCount: 120000
+      minVersion: 6.1
+
+  zookeeperNodes:
+      #####################
+      ### PCVM ZK nodes ###
+      #####################
+    - path: /appliance/physical/clusterexternalstate
+      watch: true
+      backupFrequency: high
+      proto: CLUSTER_EXTERNAL_STATE
+      dataType: TRUST_DATA
+    - path: /appliance/physical/clusterdatastate
+      watch: true
+      backupFrequency: high
+      proto: CLUSTER_DATA_STATE
+    - path: /appliance/physical/userrepository
+      watch: true
+      backupFrequency: high
+      proto: USER_REPOSITORY
+      dataType: TRUST_DATA
+    - path: /appliance/logical/services_enablement_status
+      watch: true
+      backupFrequency: high
+    - path: /appliance/physical/zeusconfig
+      watch: true
+      backupFrequency: high
+      proto: CONFIGURATION
+    - path:  /appliance/physical/configuration
+      watch: true
+      backupFrequency: high
+      proto: CONFIGURATION
+    - path: /appliance/logical/atlas/atlas_config
+      watch: true
+      backupFrequency: high
+      proto: ATLAS_CONFIG
+    - path: /appliance/physical/blacklist
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### Prism Pro ###
+      #####################
+    - path: /appliance/logical/dpm/dpm_symmetric_key
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/prism_ops/prism_ops_manager
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### Flow ###
+      #####################
+    - path: /appliance/logical/microseg/config_operations_lock
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/default_quarantine_rule_restored
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/default_quarantine_rule_uuid
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/forensics_quarantine_rule_uuid
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/generation_numbers
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/microseg_enabled
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/microseg_enabled_mode
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/microseg_enabled_timestamp
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/operating_version
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/microseg/upgrade_cleanup
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow/service_group_defaults_created
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow/policy_hit
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow/security_monitoring
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow/config
+      watch: true
+      backupFrequency: high
+      proto: FLOW_CONFIG
+    - path: /appliance/logical/flow/default_policies/forensic_quarantine_policy_uuid
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow/default_policies/strict_quarantine_policy_uuid
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### AzureSpecific zknodes ###
+      #####################
+    - path: /appliance/logical/orchestrator/metadata/userdata
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/orchestrator/component_registration_status
+      watch: true
+      backupFrequency: high
+      #####################
+      ### vulcan ###
+      #####################
+    - path: /appliance/logical/vulcan/symmetric_key
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### Lazan ###
+      #####################
+    - path: /appliance/logical/scheduler #need to check
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### IAM ###
+      #####################
+    - path: /appliance/logical/iam_flags
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/prism/userdata
+      watch: true
+      backupFrequency: high
+      proto: USER_DATA_REPOSITORY
+    - path: /appliance/logical/prism/rolemapping
+      watch: true
+      backupFrequency: high
+      proto: ROLE_MAPPING
+    - path: /appliance/logical/prismsecurekey
+      watch: true
+      backupFrequency: high
+      proto: SECURE_KEY_REPOSITORY
+    - path: /appliance/logical/ce_user_repository
+      watch: true
+      backupFrequency: high
+      proto: CE_USER_REPOSITORY
+    - path: /appliance/logical/auth/ca.pem
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/abac_user_migration
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### Stats GW ###
+      #####################
+    - path: /appliance/logical/prism/rbac_enabled
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/enable_nutanix_apps
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/xi_mgmt/config
+      watch: true
+      backupFrequency: high
+
+      #########################
+      ### Disaster Recovery ###
+      #########################
+    - path: /appliance/logical/disaster_recovery/disaster_recovery_enabled_timestamp
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### MSP ###
+      #####################
+    - path: /appliance/logical/msp/version
+      backupFrequency: high
+
+      #####################
+      #####  License  #####
+      #####################
+    - path: /appliance/logical/license/pc_cbl_status
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/license/configuration
+      watch: true
+      backupFrequency: high
+      proto: LICENSE_CONFIG
+    - path: /appliance/logical/license/post_paid
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/license/nutanix_cluster
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/license/trial
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/license/apply_lsf
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/license/features_metadata
+      watch: true
+      backupFrequency: high
+
+      #####################
+      #####  Mercury  #####
+      #####################
+    - path: /appliance/logical/MercurySharedInfo
+      watch: true
+      backupFrequency: high
+
+      #####################
+      #####  Objects  #####
+      #####################
+    - path: /appliance/logical/objects_manager/iam_config
+      watch: true
+      backupFrequency: high
+
+      #####################
+      #### Objects lite ###
+      #####################
+    - path: /appliance/logical/component_configuration/objects_lite/object_store_uuid
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/component_configuration/objects_lite/data_container_name
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/component_configuration/objects_lite/data_hosting_pe_uuid
+      watch: true
+      backupFrequency: high
+
+      #####################
+      #### PC Resize  ####
+      #####################
+    - path: /appliance/logical/pc_resize
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/prism_ops_ultimate_memory
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/prism_ops_ultimate_vcpu
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_pc_resize
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_pc_resize_medium
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_pc_resize_large
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_pc_resize_xlarge
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_networking_pc_resize_memory
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/flow_networking_pc_resize_vcpu
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/disaster_recovery/scale
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ######  NCM  ########
+      #####################
+    - path: /appliance/logical/nusights/collectors/kIDFCollector/ncm_config
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/nusights/collectors/kIDFCollector/cluster_sync_status
+      watch: true
+      backupFrequency: high
+    - path: /appliance/physical/persistent_cfs_external_config
+      watch: true
+      backupFrequency: high
+
+      #####################
+      ### Domain Manager ##
+      #####################
+    - path: /appliance/logical/nucalm_enablement
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/calm_instance_info
+      watch: true
+      backupFrequency: high
+    - path: /appliance/physical/connection/smsp/clusterexternalstate
+      watch: true
+      backupFrequency: high
+      proto: CLUSTER_EXTERNAL_STATE
+    - path: /appliance/logical/smsp/ncm_instance_info
+      watch: true
+      backupFrequency: high
+    - path: /appliance/logical/smsp/ncm_sizer_config
+      watch: true
+      backupFrequency: high
+
+  fileSystemNodes:
+    pcvmSpecsNodes:
+      # No backupFrequency property in case of PCVMSpecs
+      # default frequency is high !
+        #####################
+        ##### PC certs ######
+        #####################
+      - path: /home/certs/ica.crt
+      - path: /home/certs/root.crt
+      - path: /home/certs/ica.csr
+
+        ######################################################
+        ###### Secure fileSystem nodes starts from here. #####
+        ######################################################
+
+        #####################
+        ##### PC Keys #######
+        #####################
+      - path: /home/certs/ica.key
+        secure: true
+      - path: /home/certs/root.key
+        secure: true
+        ###############################################
+        ###### Secure fileSystem nodes end here. ######
+        ###############################################
+    generalNodes:
+      - path: /home/nutanix/config/.*\.gflags
+        backupFrequency: low
+        regex: true
+      - path: /home/private/server.cert
+        backupFrequency: high
+      - path: /home/private/aplos.cert
+        backupFrequency: high
+      - path: /home/private/gen_server.cert
+        backupFrequency: high
+      - path: /home/nutanix/config/xdiscovery.ini
+        backupFrequency: high
+      - path: /home/nutanix/config/resource_limits/limits_override.json
+        backupFrequency: low
+      - path: /home/nutanix/config/upgrade.history
+        backupFrequency: high
+      - path: /home/nutanix/.bash_history
+        backupFrequency: high
+      - path: /home/nutanix/.nutanix_history
+        backupFrequency: high
+      - path: /home/nutanix/.nuclei_history
+        backupFrequency: high
+
+        ######################################################
+        ###### Secure fileSystem nodes starts from here. #####
+        ######################################################
+      - path: /home/private/server.key
+        backupFrequency: high
+        secure: true
+      - path: /home/private/aplos.key
+        backupFrequency: high
+        secure: true
+      - path: /home/private/gen_server.key
+        backupFrequency: high
+        secure: true
+      ## regex defined here is for terminal bash command "sudo find" as
+      ## per internal code implementation(sudo find . -name "temppemserver*.key").
+      - path: /home/private/temppemserver*.key
+        backupFrequency: high
+        regex: true
+        secure: true
+        ###############################################
+        ###### Secure fileSystem nodes end here. ######
+        ###############################################
+
+        ###############################################
+        ###AzureSpecific fileSystem nodes #############
+        ###############################################
+      - path: /home/nutanix/component_registry_config.json
+        backupFrequency: high
+      - path: /home/nutanix/config/mcm_config/pc-environment.json
+        backupFrequency: high
+
+        ###############################################
+        ###PCBR ObjectStore Certificates #############
+        ###############################################
+      - path: /home/nutanix/config/pcbr/.*\.pem
+        backupFrequency: high
+        regex: true
+
+  ## Mapping of LCM services as per the lcmGetEntities API (entityClass,
+  ## entityModel, entityType) with the Genesis Service
+  lcmGenesisServiceMapping:
+#    - lcmService: [ LICENSING SERVICE, Licensing, SOFTWARE ]
+#      genesisService: LicensingService
+    - lcmService: [PC Service, Flow Network Security PC, SOFTWARE]
+      genesisService: Flow
+    #- lcmService: [Core Cluster, File Server PC, SOFTWARE]
+    #  genesisService: SecureFileSyncService
+    - lcmService: [PC, Epsilon, SOFTWARE]
+      genesisService: EpsilonService
+    - lcmService: [PC, Calm, SOFTWARE]
+      genesisService: NuCalmService
+    - lcmService: [PC, Objects Manager, SOFTWARE]
+      genesisService: AossServiceManagerService
+    - lcmService: [PC Service, MSP, SOFTWARE]
+      genesisService: MspControllerService
+    #- lcmService: [PC Core Cluster, Objects Service, SOFTWARE]
+    #  genesisService: AOSService
+    - lcmService: [Files, Files Manager, SOFTWARE]
+      genesisService: FilesManagerService
+    - lcmService: [PC Service, Foundation Central, SOFTWARE]
+      genesisService: FoundationCentralService
+    - lcmService: [Core Cluster, NCC, SOFTWARE]
+      genesisService: ClusterHealthService
+    - lcmService: [PC Service, Nutanix Kubernetes Engine, SOFTWARE]
+      genesisService: KarbonCoreService
+
+
+    # Not sure: Calm Policy Engine, NCR
+
+

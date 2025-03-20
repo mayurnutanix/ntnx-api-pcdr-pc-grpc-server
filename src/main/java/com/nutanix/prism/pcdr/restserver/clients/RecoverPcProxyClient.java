@@ -17,6 +17,7 @@ import com.nutanix.prism.pcdr.util.HttpHelper;
 import com.nutanix.prism.pcdr.util.RequestUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.Collections;
 
@@ -43,6 +45,10 @@ public class RecoverPcProxyClient {
 
   @Autowired
   private ApiClientGenerator apiClientGenerator;
+
+  @Autowired
+  @Qualifier("serviceTemplate")
+  private RestTemplate restTemplate;
 
   @Autowired
   private HttpHelper httpHelper;

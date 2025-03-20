@@ -6,7 +6,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @Slf4j
-@SpringBootApplication(scanBasePackages = {"com.nutanix.pcdr.*"})
+@SpringBootApplication(scanBasePackages = {"com.nutanix.prism.pcdr.*"})
 public class ProtectionSpringBootApplication {
   public static void main(String[] args) throws InterruptedException {
     SpringApplication application =

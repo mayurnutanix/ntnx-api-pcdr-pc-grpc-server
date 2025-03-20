@@ -13,8 +13,8 @@
     <properties>
         <start-class>com.nutanix.license.ProtectionSpringBootApplication
         </start-class>
-        <service-parent.version>17.0.0-SNAPSHOT</service-parent.version>
-        <pcdr.common.version>17.0.0.1194-RELEASE</pcdr.common.version>
+        <service-parent.version>17.0.0.2350-RELEASE</service-parent.version>
+        <pcdr.common.version>17.4.0-SNAPSHOT</pcdr.common.version>
         <pcdr.pe.version>17.0.0.1925-RELEASE</pcdr.pe.version>
         <grpc.version>1.37.0</grpc.version>
         <lcm-api.version>17.0.0.1833-RELEASE</lcm-api.version>

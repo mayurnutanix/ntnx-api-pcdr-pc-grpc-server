@@ -17,20 +17,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import com.nutanix.api.utils.json.JsonUtils;
 import com.nutanix.prism.cluster.protobuf.ClusterExternalStateProto;
-import com.nutanix.prism.pcdr.util.ObjectStoreClientInstanceFactory;
 import com.nutanix.prism.pcdr.PcBackupMetadataProto;
 import com.nutanix.prism.pcdr.constants.ObjectStoreProviderEnum;
 import com.nutanix.prism.pcdr.dto.ObjectStoreEndPointDto;
 import com.nutanix.prism.pcdr.exceptions.PCResilienceException;
 import com.nutanix.prism.pcdr.util.*;
+import com.nutanix.prism.pcdr.util.ObjectStoreClientInstanceFactory;
 import dp1.pri.prism.v4.management.AWSS3Config;
+import dp1.pri.prism.v4.management.NutanixObjectsConfig;
 import dp1.pri.prism.v4.management.ObjectStoreLocation;
 import dp1.pri.prism.v4.protectpc.PcEndpointCredentials;
 import dp1.pri.prism.v4.protectpc.PcEndpointFlavour;
 import dp1.pri.prism.v4.protectpc.PcObjectStoreEndpoint;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
-
 import java.util.Base64;
 import java.util.List;
 
@@ -44,7 +44,7 @@ public class S3ServiceUtil {
 
   static {
     objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
-        false);
+            false);
   }
 
   /**
@@ -58,6 +58,7 @@ public class S3ServiceUtil {
    * @param contentAsBytes
    * @return String: md5 checksum
    */
+  // TODO: Check if can remove
   public static String calculateMD5Checksum(byte[] contentAsBytes) {
     byte[] destCalculatedMD5Hash = Md5Utils.computeMD5Hash(contentAsBytes);
     return BinaryUtils.toHex(destCalculatedMD5Hash);
@@ -68,6 +69,7 @@ public class S3ServiceUtil {
    * @param pcClusterUuid
    * @return String: pcSeedData object key
    */
+  // TODO: Can move to common, PE also have same method
   public static String getPcSeedDataObjectKey(String pcClusterUuid) {
     return String.format(PC_SEED_DATA_OBJECT_KEY_STR, pcClusterUuid);
   }
@@ -100,26 +102,26 @@ public class S3ServiceUtil {
    * @param objectStoreEndPointDto, pcclusterUuid
    */
   public static List<String> getExistingMetadataListForPc(
-      final ObjectStoreEndPointDto objectStoreEndPointDto, final String pcClusterUuid,
-      final String accessKey, final String secretAccessKey) {
+          final ObjectStoreEndPointDto objectStoreEndPointDto, final String pcClusterUuid,
+          final String accessKey, final String secretAccessKey) {
     // Prefix of metadata object key which looks like -
     // pc_backup/pc_metadata!*<pc-cluster-uuid>
     final String keyPrefixWithClusterId =
-        String.format("%s%s%s%s", OBJECTSTORE_PC_METADATA_BASE_PREFIX,
-                      OBJECTSTORE_PC_METADATA_PREFIX,
-                      OBJECTSTORE_PC_METADATA_SPLIT_REGEX, pcClusterUuid);
+            String.format("%s%s%s%s", OBJECTSTORE_PC_METADATA_BASE_PREFIX,
+                    OBJECTSTORE_PC_METADATA_PREFIX,
+                    OBJECTSTORE_PC_METADATA_SPLIT_REGEX, pcClusterUuid);
     String bucketName = objectStoreEndPointDto.getBucket();
     String error;
     try {
 
       // Fetch s3 client
       log.info(String.format("Fetching S3 client with bucketName: %s" +
-                             " and objectKey: %s", bucketName, keyPrefixWithClusterId));
+              " and objectKey: %s", bucketName, keyPrefixWithClusterId));
       AmazonS3 s3Client =
-          ObjectStoreClientInstanceFactory
-              .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
+              ObjectStoreClientInstanceFactory
+                      .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
       final ObjectListing objectList =
-          s3Client.listObjects(bucketName, keyPrefixWithClusterId);
+              s3Client.listObjects(bucketName, keyPrefixWithClusterId);
       List<String> objectkeys = Lists.newArrayList();
       for (S3ObjectSummary s : objectList.getObjectSummaries()) {
         objectkeys.add(s.getKey());
@@ -131,32 +133,32 @@ public class S3ServiceUtil {
         log.error(error, amazonS3Exception);
       }
       error = String.format(
-          "Failed to fetch PC metadata from s3 due to exception: %s",
-          amazonS3Exception.getMessage());
+              "Failed to fetch PC metadata from s3 due to exception: %s",
+              amazonS3Exception.getMessage());
       log.error(error, amazonS3Exception);
     } catch (final AmazonClientException ex) {
       error = String.format(
-          "Failed to fetch PC metadata from s3 due to exception: %s",
-          ex.getMessage());
+              "Failed to fetch PC metadata from s3 due to exception: %s",
+              ex.getMessage());
       log.error(error, ex);
     } catch (final Exception exception) {
       error = String.format("Failed to fetch PC metadata from s3 due to %s",
-                            exception.getMessage());
+              exception.getMessage());
       log.error(error, exception);
     }
     return Lists.newArrayList();
   }
 
   /**
-  * Helper method to access the metadata for a particular PC if already
+   * Helper method to access the metadata for a particular PC if already
    * present on s3.
    * @param objectkeys
    * @param pcClusterUuid
    * @return Null if doesn't exist, else the metadata object key string.
    * */
   public static String getPcMetadata(
-      final List<String> objectkeys,
-      final String pcClusterUuid) {
+          final List<String> objectkeys,
+          final String pcClusterUuid) {
     // Iterate the summary list and match the pcClusterUuid.
     for (String key : objectkeys) {
       if (key.contains(pcClusterUuid)) {
@@ -174,10 +176,10 @@ public class S3ServiceUtil {
    * @return Null if doesn't exist, else the metadata object key string.
    * */
   public static void writeMetadataObjectOnS3(
-      final String metadataString,
-      final ObjectStoreEndPointDto objectStoreEndPointDto,
-      final String accessKey,
-      final String secretAccessKey) {
+          final String metadataString,
+          final ObjectStoreEndPointDto objectStoreEndPointDto,
+          final String accessKey,
+          final String secretAccessKey) {
     String bucketName = objectStoreEndPointDto.getBucket();
     String error;
     log.info("Writing metadata object on s3 "+ metadataString);
@@ -191,20 +193,20 @@ public class S3ServiceUtil {
       metadata.setContentMD5(checksum);
 
       final PutObjectRequest putObjectRequest =
-          new PutObjectRequest(bucketName, metadataString,
-                               new java.io.ByteArrayInputStream(new byte[0]), metadata);
+              new PutObjectRequest(bucketName, metadataString,
+                      new java.io.ByteArrayInputStream(new byte[0]), metadata);
       AmazonS3 s3Client =
-          ObjectStoreClientInstanceFactory
-              .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
+              ObjectStoreClientInstanceFactory
+                      .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
       s3Client.putObject(putObjectRequest);
     } catch (final AmazonServiceException ex) {
       error = String.format(
-          "Failed to write PC metadata to s3 due to exception: %s",
-          ex.getMessage());
+              "Failed to write PC metadata to s3 due to exception: %s",
+              ex.getMessage());
       log.error(error, ex);
     } catch (final Exception exception) {
       error = String.format("Failed to write PC metadata to s3 due to %s",
-                            exception.getMessage());
+              exception.getMessage());
       log.error(error, exception);
     }
   }
@@ -219,10 +221,10 @@ public class S3ServiceUtil {
    * @return true if deletion is successful, false otherwise.
    * */
   public static boolean deleteMetadataObjectFromS3(
-      final String metadataObjectKey,
-      final ObjectStoreEndPointDto objectStoreEndPointDto,
-      final String accessKey,
-      final String secretAccessKey) {
+          final String metadataObjectKey,
+          final ObjectStoreEndPointDto objectStoreEndPointDto,
+          final String accessKey,
+          final String secretAccessKey) {
     String bucketName = "";
     String error;
     log.info("Deleting object key on s3 "+ metadataObjectKey);
@@ -230,37 +232,37 @@ public class S3ServiceUtil {
       // Parse region and bucket name from endpoint address.
       bucketName = objectStoreEndPointDto.getBucket();
       DeleteObjectsRequest.KeyVersion key =
-          new DeleteObjectsRequest.KeyVersion(metadataObjectKey);
+              new DeleteObjectsRequest.KeyVersion(metadataObjectKey);
       List<DeleteObjectsRequest.KeyVersion> listofKeysToDelete =
-          Lists.newArrayList();
+              Lists.newArrayList();
       listofKeysToDelete.add(key);
       final DeleteObjectsRequest deleteObjectRequest =
-          new DeleteObjectsRequest(bucketName);
+              new DeleteObjectsRequest(bucketName);
       deleteObjectRequest.setKeys(listofKeysToDelete);
       AmazonS3 s3Client =
-          ObjectStoreClientInstanceFactory
-              .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
+              ObjectStoreClientInstanceFactory
+                      .getS3Client(objectStoreEndPointDto, accessKey, secretAccessKey);
       DeleteObjectsResult deleteResponse = s3Client.deleteObjects(deleteObjectRequest);
       // Check if the deleted objects count is 1.
       if (deleteResponse.getDeletedObjects().size() > 0) {
         log.info(String.format("Successfully deleted metadata object %s from s3 " +
-                        "bucket %s", metadataObjectKey, bucketName));
+                "bucket %s", metadataObjectKey, bucketName));
         return true;
       }
     } catch (final AmazonServiceException ex) {
       error = String.format(
-          "Failed to delete PC metadata %s from s3 bucket %s: %s",
-          metadataObjectKey, bucketName, ex.getMessage());
+              "Failed to delete PC metadata %s from s3 bucket %s: %s",
+              metadataObjectKey, bucketName, ex.getMessage());
       log.error(error, ex);
       return false;
     } catch (final Exception exception) {
       error = String.format("Failed to write PC metadata to s3 due to %s",
-                            exception.getMessage());
+              exception.getMessage());
       log.error(error, exception);
       return false;
     }
     log.warn(String.format("Unable to delete metadata object %s from s3 bucket %s",
-             metadataObjectKey, bucketName));
+            metadataObjectKey, bucketName));
     return false;
   }
 
@@ -268,40 +270,44 @@ public class S3ServiceUtil {
 
     if (objectStoreLocation.getProviderConfig() instanceof AWSS3Config){
       return ObjectStoreProviderEnum.AWS_S3;
+    } else if (objectStoreLocation.getProviderConfig() instanceof NutanixObjectsConfig) {
+      return ObjectStoreProviderEnum.NUTANIX_OBJECTS;
     }
     return null;
   }
 
   public static PcObjectStoreEndpoint getPcObjectStoreEndpointFromProtoPcBackupConfig(
-      ClusterExternalStateProto.PcBackupConfig pcBackupConfig, PcBackupMetadataProto.PCVMBackupTargets pcvmBackupTargets) throws PCResilienceException {
+          ClusterExternalStateProto.PcBackupConfig pcBackupConfig, PcBackupMetadataProto.PCVMBackupTargets pcvmBackupTargets) throws PCResilienceException {
     PcObjectStoreEndpoint pcObjectStoreEndpoint = new PcObjectStoreEndpoint();
     ClusterExternalStateProto.PcBackupConfig.ObjectStoreEndpoint objectStoreEndpoint
-        = pcBackupConfig.getObjectStoreEndpoint();
+            = pcBackupConfig.getObjectStoreEndpoint();
     pcObjectStoreEndpoint.setEndpointAddress(objectStoreEndpoint.getEndpointAddress());
     pcObjectStoreEndpoint.setBucket(objectStoreEndpoint.getBucketName());
     pcObjectStoreEndpoint.setRegion(objectStoreEndpoint.getRegion());
-    pcObjectStoreEndpoint.setIpAddressOrDomain(S3ObjectStoreUtil.getHostnameOrIPFromEndpointAddress(
-        objectStoreEndpoint.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
+    if (objectStoreEndpoint.getEndpointFlavour() == ClusterExternalStateProto.PcBackupConfig.ObjectStoreEndpoint.EndpointFlavour.kOBJECTS) {
+      pcObjectStoreEndpoint.setIpAddressOrDomain(S3ObjectStoreUtil.getHostnameOrIPFromEndpointAddress(
+              objectStoreEndpoint.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
+      pcObjectStoreEndpoint.setSkipCertificateValidation(objectStoreEndpoint.getSkipCertificateValidation());
+      pcObjectStoreEndpoint.setHasCustomCertificate(ObjectUtils.isNotEmpty(objectStoreEndpoint.getCertificatePath()));
+    }
     pcObjectStoreEndpoint.setEndpointFlavour(PcEndpointFlavour.fromString(
-        objectStoreEndpoint.getEndpointFlavour().toString()));
-    pcObjectStoreEndpoint.setSkipCertificateValidation(objectStoreEndpoint.getSkipCertificateValidation());
+            objectStoreEndpoint.getEndpointFlavour().toString()));
     pcObjectStoreEndpoint.setBackupRetentionDays(objectStoreEndpoint.getBackupRetentionDays());
     pcObjectStoreEndpoint.setRpoSeconds(pcBackupConfig.getRpoSecs());
     pcObjectStoreEndpoint.setEndpointCredentials(new PcEndpointCredentials());
 
-    if (!ObjectUtils.isEmpty(objectStoreEndpoint.getCertificatePath())) {
+    if (!ObjectUtils.isEmpty(objectStoreEndpoint.getCertificatePath()) && !objectStoreEndpoint.getSkipCertificateValidation()) {
       PcBackupMetadataProto.PCVMBackupTargets.ObjectStoreBackupTarget objectStoreBackupTarget = pcvmBackupTargets.getObjectStoreBackupTargetsList().stream()
-          .filter(objectStoreBackupTarget1 ->
-              objectStoreBackupTarget1.getCertificatePath().equals(objectStoreEndpoint.getCertificatePath()))
-          .findFirst().orElse(null);
+              .filter(objectStoreBackupTarget1 ->
+                      objectStoreBackupTarget1.getCertificatePath().equals(objectStoreEndpoint.getCertificatePath()))
+              .findFirst().orElse(null);
       if (!ObjectUtils.isEmpty(objectStoreBackupTarget)) {
         pcObjectStoreEndpoint.getEndpointCredentials().setCertificate(
-            new String(Base64.getDecoder().decode(objectStoreBackupTarget.getCertificateContent().toStringUtf8())));
+                CertificatesUtility.getCertificateStringFromByteString(objectStoreBackupTarget.getCertificateContent()));
       } else {
         log.info("pc_backup_metadata and pc_backup_config inconsistent. Reading certificate content from file instead of pc_backup_metadata");
         pcObjectStoreEndpoint.getEndpointCredentials().setCertificate(
-            CertificatesUtility.readCertificateFromPath(objectStoreEndpoint.getCertificatePath(),
-                objectStoreEndpoint.getEndpointAddress()));
+                CertificatesUtility.readCertificateFromPath(objectStoreEndpoint.getCertificatePath()));
       }
     }
 
@@ -310,29 +316,36 @@ public class S3ServiceUtil {
 
   // extract from pc_backup_metadata
   public static PcObjectStoreEndpoint getPcObjectStoreEndpointFromPCVMObjectStoreBackupTarget(
-      PcBackupMetadataProto.PCVMBackupTargets.ObjectStoreBackupTarget objectStoreBackupTarget) throws PCResilienceException {
+          PcBackupMetadataProto.PCVMBackupTargets.ObjectStoreBackupTarget objectStoreBackupTarget) throws PCResilienceException {
     PcObjectStoreEndpoint pcObjectStoreEndpoint = new PcObjectStoreEndpoint();
     pcObjectStoreEndpoint.setEndpointAddress(objectStoreBackupTarget.getEndpointAddress());
     pcObjectStoreEndpoint.setBucket(objectStoreBackupTarget.getBucketName());
     pcObjectStoreEndpoint.setRegion(objectStoreBackupTarget.getRegion());
-    pcObjectStoreEndpoint.setIpAddressOrDomain(S3ObjectStoreUtil.getHostnameOrIPFromEndpointAddress(
-        objectStoreBackupTarget.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
+    PcEndpointCredentials pcEndpointCredentials = new PcEndpointCredentials();
+    if (objectStoreBackupTarget.getEndpointFlavour() == PcBackupMetadataProto.PCVMBackupTargets.ObjectStoreBackupTarget.EndpointFlavour.kOBJECTS) {
+      pcObjectStoreEndpoint.setIpAddressOrDomain(S3ObjectStoreUtil.getHostnameOrIPFromEndpointAddress(
+              objectStoreBackupTarget.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
+      pcObjectStoreEndpoint.setSkipCertificateValidation(objectStoreBackupTarget.getSkipCertificateValidation());
+      pcObjectStoreEndpoint.setHasCustomCertificate(ObjectUtils.isNotEmpty(objectStoreBackupTarget.getCertificatePath()));
+      if (ObjectUtils.isNotEmpty(objectStoreBackupTarget.getCertificatePath())) {
+        pcEndpointCredentials.setCertificate(
+                CertificatesUtility.getCertificateStringFromByteString(objectStoreBackupTarget.getCertificateContent())
+        );
+      }
+    }
     pcObjectStoreEndpoint.setEndpointFlavour(PcEndpointFlavour.fromString(
-        objectStoreBackupTarget.getEndpointFlavour().toString()));
-    pcObjectStoreEndpoint.setSkipCertificateValidation(objectStoreBackupTarget.getSkipCertificateValidation());
+            objectStoreBackupTarget.getEndpointFlavour().toString()));
     pcObjectStoreEndpoint.setBackupRetentionDays(objectStoreBackupTarget.getBackupRetentionDays());
     pcObjectStoreEndpoint.setRpoSeconds(objectStoreBackupTarget.getRpoSecs());
-    pcObjectStoreEndpoint.setEndpointCredentials(
-        new PcEndpointCredentials(null, null,
-            new String(Base64.getDecoder().decode(objectStoreBackupTarget.getCertificateContent().toStringUtf8()))));
+    pcObjectStoreEndpoint.setEndpointCredentials(pcEndpointCredentials);
     return pcObjectStoreEndpoint;
   }
 
   public static ClusterExternalStateProto.ObjectStoreCredentials getCredentialsProtoFromEndpointCredentials(PcEndpointCredentials pcEndpointCredentials) throws PCResilienceException {
     ClusterExternalStateProto.ObjectStoreCredentials.Builder objectStoreEndPointCredentialBuilder = ClusterExternalStateProto.
-        ObjectStoreCredentials.newBuilder();
+            ObjectStoreCredentials.newBuilder();
     ObjectStoreUtil.setObjectToProto(pcEndpointCredentials,
-        objectStoreEndPointCredentialBuilder);
+            objectStoreEndPointCredentialBuilder);
     ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto = objectStoreEndPointCredentialBuilder.build();
     return objectStoreCredentialsProto;
   }

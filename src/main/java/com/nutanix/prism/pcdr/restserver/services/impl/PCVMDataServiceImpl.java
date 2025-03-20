@@ -120,13 +120,13 @@ public class PCVMDataServiceImpl implements PCVMDataService {
    */
   public PCVMSpecs constructPCVMSpecs(String keyId)
       throws PCResilienceException {
-    log.debug("Entering PCVMSpecs method.");
     PCVMSpecs.Builder pcvmSpecs = PCVMSpecs.newBuilder();
     ZeusConfiguration zeusConfig = instanceServiceFactory.getZeusConfig();
     PCVMHostingPEInfo pcvmHostingPEInfo = null;
     // Set clusterUuid and clusterName
     pcvmSpecs.setClusterUuid(zeusConfig.getClusterUuid());
     pcvmSpecs.setClusterName(zeusConfig.getClusterName());
+
 
     // ZeusConfig will always have at-least one node.
     // Get that node, and from that node fetch the vmUuid and fullVersion.
@@ -137,6 +137,7 @@ public class PCVMDataServiceImpl implements PCVMDataService {
     // Fetch hosting PE info from zknode to get hosting PE ip.
     try {
       pcvmHostingPEInfo = constructPCVMHostingPEInfo();
+      log.info("Entering PCVMSpecs method01.");
     }
     catch (PCResilienceException e) {
       log.error(ErrorMessages.HOSTING_PE_INFO_FETCH_ERROR, e);
@@ -144,27 +145,34 @@ public class PCVMDataServiceImpl implements PCVMDataService {
     }
 
     String hostingPEIp = pcvmHostingPEInfo.getExternalIp();
+    log.info("Entering PCVMSpecs method0.");
     pcvmSpecs.setFullVersion(zeusConfig.getLocalNode().getSoftwareVersion());
+
     pcvmSpecs.setDisplayVersion(getShortPcVersion());
     // fetch pcvm specs from hosting PE (vm entity) via groups api.
+    log.info("Entering PCVMSpecs method10.");
+
     ResponseEntity<GroupEntityResult> groupResponseData = groupsUtil.fetchPCVmSpecs(hostingPEIp, vmUuidList);
+    log.info("Entering PCVMSpecs method.");
     GroupEntityResult groupEntityResult = groupResponseData.getBody();
     // Set SystemConfig and NetworkConfig in PCVMSpecs.
     pcvmSpecs.setClusterSystemConfig(constructClusterSystemConfig(groupEntityResult.getGroupResults().get(0)));
+
     pcvmSpecs.setClusterNetworkConfig(constructClusterNetworkConfig(
         groupEntityResult.getGroupResults().get(0),vmUuidList,hostingPEIp));
+    log.info("Entering PCVMSpecs method2");
     if (ObjectUtils.isEmpty(zeusConfig.getPCClusterInfo()) ||
             ObjectUtils.isEmpty(zeusConfig.getPCClusterInfo().get().getSize())){
       throw new PCResilienceException(PC_SIZE_FETCH_FROM_ZEUS_ERROR,
               ErrorCode.PCBR_PC_SIZE_NOT_FOUND_IN_ZEUS, HttpStatus.INTERNAL_SERVER_ERROR);
     }
     pcvmSpecs.setSize(PCUtil.getSizeFromString(zeusConfig.getPCClusterInfo().get().getSize().toString()).toString());
-
+    log.info("Entering PCVMSpecs method3");
     // Set certificates present in /home/certs
     pcvmSpecs.setClusterCertificates(
         getClusterCertificates(keyId, Constants.ENCRYPTION_VERSION_V1));
 
-    log.debug("Successfully constructed PCVMSpecs.");
+    log.info("Successfully constructed PCVMSpecs.");
     return pcvmSpecs.build();
   }
 
@@ -216,20 +224,26 @@ public class PCVMDataServiceImpl implements PCVMDataService {
     }
     log.debug(
         "PCVM IPs extracted for finding prism central shorter version are:" + ips);
+    log.info(
+            "PCVM IPs extracted for finding prism central shorter version are:" + ips);
     String version = "";
     // if unable to fetch version from one PC ip try on other IPs.
     for (String ip : ips) {
       try {
+        log.info("0");
         HttpHeaders serviceAuthHeaders = httpHelper.getServiceAuthHeaders(
             Constants.PRISM_SERVICE, Constants.PRISM_KEY_PATH,
             Constants.PRISM_CERT_PATH);
 
+        log.info("1");
         String completeURL = RequestUtil.makeFullUrl(ip, JGW_BASE_PATH+VERSION_API_URL,
             Constants.JGW_PORT, Collections.emptyMap(), Collections.emptyMap(), true);
+        log.info("2");
         ResponseEntity<String> result = httpHelper.invokeAPI(completeURL,
             new HttpEntity<>(serviceAuthHeaders), HttpMethod.GET,
             String.class
             );
+        log.info("3");
         if (result.getStatusCode().is2xxSuccessful()) {
           HttpHeaders httpHeaders = result.getHeaders();
           log.debug(String.format(
@@ -239,6 +253,7 @@ public class PCVMDataServiceImpl implements PCVMDataService {
               Constants.RESPONSE_VERSION_HEADER);
           if (!versionList.isEmpty()) {
             version = versionList.get(0);
+            log.info("Fetched Short version of PC is:" + version);
             log.debug("Fetched Short version of PC is:" + version);
             return version;
           }

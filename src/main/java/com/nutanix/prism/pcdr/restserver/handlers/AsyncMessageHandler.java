@@ -93,7 +93,7 @@ public class AsyncMessageHandler {
     }
 
 
-    @Async("adonisServiceThreadPool")
+    @Async
     public void createBackupTargetAsync(BackupTargets backupTargets, ByteString taskId) throws ErgonException {
 
         DistributedLock distributedLock =
@@ -113,6 +113,7 @@ public class AsyncMessageHandler {
             ergonServiceHelper.updateTaskStatus(taskId, ErgonTypes.Task.Status.kFailed,
                     exceptionDetails, ErrorArgumentKey.CREATE_BACKUP_TARGET_OPERATION);
         } finally {
+            log.info("Unlocking");
             distributedLock.unlock();
         }
     }

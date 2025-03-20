@@ -1,18 +1,36 @@
 package com.nutanix.prism.pcdr.restserver.services.impl;
 
 
+import static com.nutanix.prism.pcdr.constants.Constants.*;
+import static com.nutanix.prism.pcdr.restserver.constants.Constants.PCDR_ENDPOINT_ADDRESS_SPLIT_REGEX;
+import static com.nutanix.prism.pcdr.constants.Constants.*;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
-import com.google.protobuf.ByteString;
 import com.nutanix.dp1.lcmroot.lifecycle.v4.resources.Entity;
+
+import com.google.protobuf.ByteString;
 import com.nutanix.dp1.lcmroot.lifecycle.v4.resources.ListEntitiesApiResponse;
 import com.nutanix.insights.exception.InsightsInterfaceException;
-import com.nutanix.insights.ifc.InsightsInterfaceProto.*;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.BatchUpdateEntitiesArg;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.DataValue;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.DeleteClusterReplicationStateArg;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.DeleteClusterReplicationStateRet;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.DeleteEntityArg;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.EntityGuid;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.EntityWithMetric;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.EntityWithMetricAndLookup;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.GetEntitiesWithMetricsArg;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.GetEntitiesWithMetricsRet;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.Query;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.QueryGroupResult;
 import com.nutanix.insights.ifc.InsightsInterfaceProto.QueryOrderBy.SortKey;
 import com.nutanix.insights.ifc.InsightsInterfaceProto.QueryOrderBy.SortOrder;
+import com.nutanix.insights.ifc.InsightsInterfaceProto.UpdateEntityArg;
 import com.nutanix.lcmroot.java.client.ApiClient;
 import com.nutanix.lcmroot.java.client.api.EntitiesApi;
+
 import com.nutanix.prism.adapter.service.ZeusConfiguration;
 import com.nutanix.prism.cluster.protobuf.ClusterExternalStateProto;
 import com.nutanix.prism.cluster.protobuf.ClusterExternalStateProto.PcBackupConfig;
@@ -21,6 +39,7 @@ import com.nutanix.prism.cluster.protobuf.ClusterExternalStateProto.PcBackupConf
 import com.nutanix.prism.cluster.protobuf.ClusterExternalStateProto.PcBackupConfig.ObjectStoreEndpoint.EndpointFlavour;
 import com.nutanix.prism.exception.ErgonException;
 import com.nutanix.prism.exception.MantleException;
+import com.nutanix.prism.pcdr.PcBackupMetadataProto;
 import com.nutanix.prism.pcdr.PcBackupMetadataProto.PCVMBackupTargets;
 import com.nutanix.prism.pcdr.PcBackupMetadataProto.PCVMBackupTargets.ObjectStoreBackupTarget;
 import com.nutanix.prism.pcdr.PcBackupSpecsProto;
@@ -38,18 +57,48 @@ import com.nutanix.prism.pcdr.proxy.InstanceServiceFactory;
 import com.nutanix.prism.pcdr.restserver.adapters.impl.PCDRYamlAdapterImpl;
 import com.nutanix.prism.pcdr.restserver.clients.InsightsFanoutClient;
 import com.nutanix.prism.pcdr.restserver.clients.MercuryFanoutRpcClient;
+import com.nutanix.prism.pcdr.restserver.converters.PrismCentralBackupConverter;
 import com.nutanix.prism.pcdr.restserver.dto.ObjectStoreCredentialsBackupEntity;
-import com.nutanix.prism.pcdr.restserver.services.api.*;
+import com.nutanix.prism.pcdr.restserver.services.api.RunnableWithCheckedException;
+import com.nutanix.prism.pcdr.restserver.services.api.BackupEntitiesCalculator;
+import com.nutanix.prism.pcdr.restserver.services.api.BackupStatus;
+import com.nutanix.prism.pcdr.restserver.services.api.ObjectStoreBackupService;
+import com.nutanix.prism.pcdr.restserver.services.api.PCBackupService;
+import com.nutanix.prism.pcdr.restserver.services.api.PCVMDataService;
+import com.nutanix.prism.pcdr.restserver.services.api.PCVMZkService;
+import com.nutanix.prism.pcdr.restserver.services.api.PulsePublisherService;
 import com.nutanix.prism.pcdr.restserver.tasks.steps.impl.EnableCmspBasedServices;
 import com.nutanix.prism.pcdr.restserver.util.*;
 import com.nutanix.prism.pcdr.restserver.zk.PCUpgradeWatcher;
 import com.nutanix.prism.pcdr.services.ClusterHelper;
 import com.nutanix.prism.pcdr.services.ObjectStoreHelper;
-import com.nutanix.prism.pcdr.util.*;
 import com.nutanix.prism.service.ErgonService;
+import com.nutanix.prism.pcdr.util.*;
 import com.nutanix.prism.util.CompressionUtils;
 import dp1.pri.prism.v4.management.*;
 import dp1.pri.prism.v4.protectpc.*;
+
+import dp1.pri.prism.v4.protectpc.BackupTargetsInfo;
+import dp1.pri.prism.v4.protectpc.EligibleCluster;
+import dp1.pri.prism.v4.protectpc.EligibleClusterList;
+import dp1.pri.prism.v4.protectpc.ObjectStoreEndpointInfo;
+import dp1.pri.prism.v4.protectpc.PEInfo;
+import dp1.pri.prism.v4.protectpc.PcEndpointCredentials;
+import dp1.pri.prism.v4.protectpc.PcEndpointFlavour;
+import dp1.pri.prism.v4.protectpc.PcObjectStoreEndpoint;
+import dp1.pri.prism.v4.protectpc.RpoConfig;
+
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+
+import static com.nutanix.prism.pcdr.restserver.constants.Constants.*;
+import static com.nutanix.zeus.protobuf.Configuration.ConfigurationProto.PCClusterInfo.NetworkType.kDualStack;
+
+import java.util.stream.Collectors;
+
 import lombok.extern.slf4j.Slf4j;
 import nutanix.ergon.ErgonInterface.TaskListRet;
 import nutanix.ergon.ErgonTypes;
@@ -59,21 +108,11 @@ import org.apache.zookeeper.data.Stat;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.stream.Collectors;
-
-import static com.nutanix.prism.pcdr.constants.Constants.*;
-import static com.nutanix.prism.pcdr.restserver.constants.Constants.*;
-import static com.nutanix.zeus.protobuf.Configuration.ConfigurationProto.PCClusterInfo.NetworkType.kDualStack;
 
 @Slf4j
 @Service
@@ -103,13 +142,15 @@ public class PCBackupServiceImpl implements PCBackupService {
   @Autowired
   private CertFileUtil certFileUtil;
   @Autowired
+  private PrismCentralBackupConverter prismCentralBackupConverter;
+  @Autowired
   @Qualifier("pcdr.ergon")
   private ErgonService ergonService;
   @Value("${prism.pcdr.enabled.version:6.0}")
   private String pcdrEnabledVersion;
   /** This is the AOS version that would support deploying a default CMSP
-     enabled PC(2022.9). This is the AOS version that will support PCDR
-     recovery as well because recovery involves deployment.
+   enabled PC(2022.9). This is the AOS version that will support PCDR
+   recovery as well because recovery involves deployment.
    */
   @Value("${prism.pcdr.cmsp.enabled.aos.version:6.5.3}")
   private String pcdrCmspEnabledVersion;
@@ -161,7 +202,7 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @return An eligible cluster list object.
    */
   public EligibleClusterList getEligibleClusterList(boolean isSortingRequired)
-      throws PCResilienceException {
+          throws PCResilienceException {
     // Creating eligible cluster empty list to add eligible clusters from IDF.
     EligibleClusterList eligibleClusterListDTO = new EligibleClusterList();
     // Get the results of PE from IDF.
@@ -170,7 +211,7 @@ public class PCBackupServiceImpl implements PCBackupService {
     String hostingPEUuid = pcvmDataService.getHostingPEUuid();
     //todo : hostingPEUuid != null check is not required as from above function it will always be returned non null
     if (hostingPEUuid != null && pcvmDataService.isHostingPEHyperV(
-        hostingPEUuid)) {
+            hostingPEUuid)) {
       log.info("Returning eligible cluster as empty as hosting PE is HYPER-V");
       return eligibleClusterListDTO;
     }
@@ -184,31 +225,31 @@ public class PCBackupServiceImpl implements PCBackupService {
       long numNodes = group.getGroupByColumnValue().getInt64Value();
       // The rows are grouped by num_nodes
       log.debug("Traversing the group with column (num_nodes) value - {}",
-                numNodes);
+              numNodes);
       for (EntityWithMetricAndLookup entity : group.getLookupQueryResultsList()) {
 
         final String peVersion = Objects.requireNonNull(
-                                            IDFUtil
-                                                .getAttributeValueInEntityMetric(Constants.CLUSTER_VERSION,
-                                                                                 entity.getEntityWithMetrics()),
-                                            "Version field in Cluster should not be null.")
-                                        .getStrValue();
+                        IDFUtil
+                                .getAttributeValueInEntityMetric(Constants.CLUSTER_VERSION,
+                                        entity.getEntityWithMetrics()),
+                        "Version field in Cluster should not be null.")
+                .getStrValue();
         final String clusterName = Objects.requireNonNull(
-                                              IDFUtil
-                                                  .getAttributeValueInEntityMetric(Constants.CLUSTER_NAME,
-                                                                                   entity.getEntityWithMetrics()),
-                                              "cluster_name field in Cluster should not be null.")
-                                          .getStrValue();
+                        IDFUtil
+                                .getAttributeValueInEntityMetric(Constants.CLUSTER_NAME,
+                                        entity.getEntityWithMetrics()),
+                        "cluster_name field in Cluster should not be null.")
+                .getStrValue();
         final String clusterUuid = Objects.requireNonNull(
-                                              IDFUtil
-                                                  .getAttributeValueInEntityMetric(Constants.CLUSTER_UUID,
-                                                                                   entity.getEntityWithMetrics()),
-                                              "cluster_uuid field in Cluster should not be null.")
-                                          .getStrValue();
+                        IDFUtil
+                                .getAttributeValueInEntityMetric(Constants.CLUSTER_UUID,
+                                        entity.getEntityWithMetrics()),
+                        "cluster_uuid field in Cluster should not be null.")
+                .getStrValue();
 
         log.debug(String.format("Checking version compatibility for PE " +
-                                "cluster_name:%s and cluster_uuid:%s",
-                                clusterName, clusterUuid));
+                        "cluster_name:%s and cluster_uuid:%s",
+                clusterName, clusterUuid));
         if (!PCUtil.comparePEVersions(peVersion, pcdrMinPeSupportedVersion)) {
           // Check if any of the PE matches does not match the min supported
           // version, if not return empty eligibleClusterList
@@ -226,9 +267,9 @@ public class PCBackupServiceImpl implements PCBackupService {
         // will sort the replica PEs based on number of nodes and version
         // count supported by them.
         updateEligibleClusterList(eligibleClusterList, peVersion,
-                                  numNodes - computeOnlyNodeCount,
-                                  clusterName, clusterUuid, hostingPEUuid,
-                                  entitiesToBackupCount);
+                numNodes - computeOnlyNodeCount,
+                clusterName, clusterUuid, hostingPEUuid,
+                entitiesToBackupCount);
       }
     }
 
@@ -241,11 +282,11 @@ public class PCBackupServiceImpl implements PCBackupService {
     // Sort according to the number of backed up entity count which are
     // supported by AOS.
     eligibleClusterList.sort(Comparator.comparing(
-        EligibleCluster::getBackedUpEntitiesCountSupported).reversed());
+            EligibleCluster::getBackedUpEntitiesCountSupported).reversed());
     // Set the eligibleClusterList to the eligibleClusterListDTO.
     eligibleClusterListDTO.setEligibleClusterList(eligibleClusterList);
     log.debug("Successfully created EligibleClusterList object {}.",
-              eligibleClusterListDTO);
+            eligibleClusterListDTO);
 
     return eligibleClusterListDTO;
   }
@@ -264,17 +305,17 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @param entitiesToBackupCount - number of entities to backup
    */
   private void  updateEligibleClusterList(List<EligibleCluster> eligibleClusterList,
-                                         String peVersion,
-                                         long numCvmNodes,
-                                         String clusterName,
-                                         String clusterUuid,
-                                         String hostingPEUuid,
-                                         long entitiesToBackupCount) {
+                                          String peVersion,
+                                          long numCvmNodes,
+                                          String clusterName,
+                                          String clusterUuid,
+                                          String hostingPEUuid,
+                                          long entitiesToBackupCount) {
     // Checking the version compatibility for PC Backup
     if (PCUtil.comparePEVersions(peVersion, pcdrEnabledVersion)) {
       long backupEntitiesCountSupported =
-          backupEntitiesCalculator.getMaxBackupEntitiesSupportedForAOS(
-              peVersion, numCvmNodes);
+              backupEntitiesCalculator.getMaxBackupEntitiesSupportedForAOS(
+                      peVersion, numCvmNodes);
       // entitiesToBackupCount will be 0 in-case the backup limit feat is not
       // enabled. And all the PEs in the list will be compatible.
       // If backupEntitiesCountSupported by a PE is less than the already
@@ -282,22 +323,22 @@ public class PCBackupServiceImpl implements PCBackupService {
       // that PE is not eligible for backup.
       if (entitiesToBackupCount > backupEntitiesCountSupported) {
         log.warn(String.format("Current PE is incompatible due to backup " +
-                               "count of entities exceeding the supported" +
-                               " possible count, details: " +
-                               "cluster_name:%s and cluster_uuid:%s and " +
-                               "supportedCount:%d", clusterName,
-                               clusterUuid, backupEntitiesCountSupported));
+                        "count of entities exceeding the supported" +
+                        " possible count, details: " +
+                        "cluster_name:%s and cluster_uuid:%s and " +
+                        "supportedCount:%d", clusterName,
+                clusterUuid, backupEntitiesCountSupported));
       }
       else {
         log.debug(String.format("Current PE is compatible, details: " +
-                                "cluster_name:%s and cluster_uuid:%s",
-                                clusterName, clusterUuid));
+                        "cluster_name:%s and cluster_uuid:%s",
+                clusterName, clusterUuid));
         EligibleCluster eligibleCluster = new EligibleCluster();
         eligibleCluster.setClusterName(clusterName);
         eligibleCluster.setClusterUuid(clusterUuid);
         eligibleCluster.setIsHostingPe(clusterUuid.equals(hostingPEUuid));
         eligibleCluster.setBackedUpEntitiesCountSupported(
-            backupEntitiesCountSupported);
+                backupEntitiesCountSupported);
         eligibleClusterList.add(eligibleCluster);
       }
     }
@@ -310,16 +351,16 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @return - cluster entities from IDF.
    */
   public GetEntitiesWithMetricsRet fetchPEClusterListFromIDF()
-      throws PCResilienceException {
+          throws PCResilienceException {
     GetEntitiesWithMetricsRet result;
     try {
       result =
-          entityDBProxy.getEntitiesWithMetrics(
-              GetEntitiesWithMetricsArg
-                  .newBuilder().setQuery(
-                      QueryUtil.constructEligibleClusterListQuery(
-                          SortOrder.kDescending, SortKey.kLatest)
-                                        ).build());
+              entityDBProxy.getEntitiesWithMetrics(
+                      GetEntitiesWithMetricsArg
+                              .newBuilder().setQuery(
+                                      QueryUtil.constructEligibleClusterListQuery(
+                                              SortOrder.kDescending, SortKey.kLatest)
+                              ).build());
     }
     catch (InsightsInterfaceException e) {
       log.error(String.format(Constants.QUERY_IDF_FAILED, "PE Data"), e);
@@ -340,15 +381,15 @@ public class PCBackupServiceImpl implements PCBackupService {
     GetEntitiesWithMetricsRet result;
     try {
       result =
-          entityDBProxy.getEntitiesWithMetrics(
-              GetEntitiesWithMetricsArg
-                  .newBuilder()
-                  .setQuery(QueryUtil.constructPcBackupSpecsProtoQuery())
-                  .build());
+              entityDBProxy.getEntitiesWithMetrics(
+                      GetEntitiesWithMetricsArg
+                              .newBuilder()
+                              .setQuery(QueryUtil.constructPcBackupSpecsProtoQuery())
+                              .build());
     }
     catch (InsightsInterfaceException e) {
       log.error(String.format(Constants.QUERY_IDF_FAILED,
-                              Constants.PC_BACKUP_SPECS_TABLE), e);
+              Constants.PC_BACKUP_SPECS_TABLE), e);
       log.debug(APIErrorMessages.DEBUG_START, e);
       throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR,
               ErrorCode.PCBR_DATABASE_READ_BACKUP_SPECS_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
@@ -375,11 +416,11 @@ public class PCBackupServiceImpl implements PCBackupService {
         backupEntitiesCalculator.updateBackupEntityList();
       }
       entitiesToBackupCount =
-          backupEntitiesCalculator.getTotalBackupEntityCount();
+              backupEntitiesCalculator.getTotalBackupEntityCount();
     }
     catch (EntityCalculationException e) {
       log.warn("Unable to count backup entities, showing all the PEs allowed " +
-               "for backup.", e);
+              "for backup.", e);
     }
     return entitiesToBackupCount;
   }
@@ -391,19 +432,19 @@ public class PCBackupServiceImpl implements PCBackupService {
    * entries.
    */
   public GetEntitiesWithMetricsRet fetchPCZkDataFromIDF()
-      throws PCResilienceException {
+          throws PCResilienceException {
     GetEntitiesWithMetricsRet result;
     try {
       result =
-          entityDBProxy.getEntitiesWithMetrics(
-              GetEntitiesWithMetricsArg
-                  .newBuilder()
-                  .setQuery(QueryUtil.constructPCZkDataQuery())
-                  .build());
+              entityDBProxy.getEntitiesWithMetrics(
+                      GetEntitiesWithMetricsArg
+                              .newBuilder()
+                              .setQuery(QueryUtil.constructPCZkDataQuery())
+                              .build());
     }
     catch (InsightsInterfaceException e) {
       log.error(String.format(Constants.QUERY_IDF_FAILED,
-                              PC_ZK_DATA, e));
+              PC_ZK_DATA, e));
       log.debug(APIErrorMessages.DEBUG_START, e);
       throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR,
               ErrorCode.PCBR_DATABASE_READ_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
@@ -421,13 +462,13 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @return - List of String contains entityIds in GetEntitiesWithMetricsRet
    */
   private List<String> getEntityIdsFromGetEntitiesWithMetrics(
-      GetEntitiesWithMetricsRet getEntitiesWithMetricsRet) {
+          GetEntitiesWithMetricsRet getEntitiesWithMetricsRet) {
     List<QueryGroupResult> queryGroupResultList =
-        getEntitiesWithMetricsRet.getGroupResultsListList();
+            getEntitiesWithMetricsRet.getGroupResultsListList();
     List<String> entityUuidList = new ArrayList<>();
     for (QueryGroupResult queryGroupResult : queryGroupResultList) {
       List<EntityWithMetric> entityWithMetrics =
-          queryGroupResult.getRawResultsList();
+              queryGroupResult.getRawResultsList();
       for (EntityWithMetric entityWithMetric : entityWithMetrics) {
         EntityGuid entityGuid = entityWithMetric.getEntityGuid();
         String entityId = entityGuid.getEntityId();
@@ -449,13 +490,13 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                                    pc_backup_config table in IDF.
    */
   private void modifyWithoutPCBackupConfigEntries(
-      final Set<String> peClusterUuidSet,
-      List<String> clusterUuidInPCBackupConfig) {
+          final Set<String> peClusterUuidSet,
+          List<String> clusterUuidInPCBackupConfig) {
     // Removing the clusters from peClusterUuidSet which are already present
     // in pc_backup_config table.
     peClusterUuidSet.removeIf(clusterUuidInPCBackupConfig::contains);
     log.debug("PE cluster uuid set after removing pc backup config uuids - " +
-              "{}", peClusterUuidSet);
+            "{}", peClusterUuidSet);
   }
 
   /**
@@ -469,19 +510,19 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                                            endpoint present in
    *                                            pc_backup_config table in IDF.
    */
-   protected void modifyWithoutPCBackupConfigObjectStoreEntries(
-      final List<PcObjectStoreEndpoint> objectStoreEndpointList,
-      List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig) {
+  protected void modifyWithoutPCBackupConfigObjectStoreEntries(
+          final List<PcObjectStoreEndpoint> objectStoreEndpointList,
+          List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig) {
 
     // For Nutanix Objects backup entity added with IP and FQDN/different FQDN will be considered different
     // and will have two different backup configs, even if both IP and FQDN points to same Nutanix Objects.
 
     // Removing the object store endpoints  from objectStoreEndpointList which
     // are already present in pc_backup_config table.
-     objectStoreEndpointList.removeIf(p2 -> objectStoreEndpointInPCBackupConfig.stream().anyMatch
-             (p1 -> p1.getEndpointAddress().equals(p2.getEndpointAddress())));
+    objectStoreEndpointList.removeIf(p2 -> objectStoreEndpointInPCBackupConfig.stream().anyMatch
+            (p1 -> p1.getEndpointAddress().equals(p2.getEndpointAddress())));
 
-   }
+  }
 
   /**
    * Function to add the replica PE or object store endpoint to the
@@ -509,7 +550,7 @@ public class PCBackupServiceImpl implements PCBackupService {
           throws PCResilienceException, ErgonException {
 
     Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap = pcvmDataService.
-        getObjectStoreEndpointDtoMapFromPcObjectStoreEndpointList(objectStoreEndpointList);
+            getObjectStoreEndpointDtoMapFromPcObjectStoreEndpointList(objectStoreEndpointList);
 
     ZeusConfiguration zeusConfig = instanceServiceFactory.getZeusConfig();
     String networkType = clusterHelper.getNetworkType(zeusConfig);
@@ -527,8 +568,8 @@ public class PCBackupServiceImpl implements PCBackupService {
 
     try{
       TaskListRet taskListRet = ergonServiceHelper
-          .fetchTaskListRet(
-              Constants.TaskOperationType.kPCRestore.name(), false, PCDR_TASK_COMPONENT_TYPE);
+              .fetchTaskListRet(
+                      Constants.TaskOperationType.kPCRestore.name(), false, PCDR_TASK_COMPONENT_TYPE);
       if (taskListRet.getTaskUuidListCount() > 0) {
         log.info("Restore task already in progress. not proceeding with addReplicas");
         throw new PCResilienceException(ErrorMessages.ADD_REPLICA_RESTORE_ALREADY_IN_PROGRESS_ERROR,
@@ -557,10 +598,10 @@ public class PCBackupServiceImpl implements PCBackupService {
     ObjectStoreCredentialsBackupEntity objectStoreCredentialsBackupEntityInPCBackupConfig =
             getObjectStoreCredentialsBackupEntityInPCBackupConfig(objectStoreEndpointList);
     List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig =
-        objectStoreCredentialsBackupEntityInPCBackupConfig.getObjectStoreEndpoints();
+            objectStoreCredentialsBackupEntityInPCBackupConfig.getObjectStoreEndpoints();
 
     log.info("Object store endpoints from backup config  - {}",
-             objectStoreEndpointInPCBackupConfig);
+            objectStoreEndpointInPCBackupConfig);
     String objectStoreEndpoints = objectStoreEndpointList.toString();
     objectStoreEndpoints = DataMaskUtil.maskSecrets(objectStoreEndpoints);
 
@@ -571,11 +612,11 @@ public class PCBackupServiceImpl implements PCBackupService {
     // throw an exception.
     if (peClusterUuidSet.isEmpty() && objectStoreEndpointList.isEmpty()) {
       String errorMessage = "Nothing to add in pc_backup_config table. " +
-                            "The ClusterUuids/ObjectStoreEndpoints sent are " +
-                            "already present in the database";
+              "The ClusterUuids/ObjectStoreEndpoints sent are " +
+              "already present in the database";
       log.warn(errorMessage);
       log.debug("PC backup config contains following cluster uuid : " +
-                clusterUuidInPCBackupConfig.toString());
+              clusterUuidInPCBackupConfig.toString());
       throw new PCResilienceException(ErrorMessages.ADD_REPLICA_BACKUP_TARGET_ALREADY_PRESENT_ERROR,
               ErrorCode.PCBR_ALREADY_PROTECTED,HttpStatus.BAD_REQUEST);
     }
@@ -584,8 +625,8 @@ public class PCBackupServiceImpl implements PCBackupService {
     // Checking the total count of replicas does not exceed maximum allowed
     // cluster value.
     checkAllowedReplicasCount(
-        peClusterUuidSet, objectStoreEndpointList,
-        clusterUuidInPCBackupConfig, objectStoreEndpointInPCBackupConfig);
+            peClusterUuidSet, objectStoreEndpointList,
+            clusterUuidInPCBackupConfig, objectStoreEndpointInPCBackupConfig);
 
     pcTaskServiceHelper.updateTask(taskId, 20);
 
@@ -599,21 +640,29 @@ public class PCBackupServiceImpl implements PCBackupService {
     //fetch mantle secret id for credentials provided in object store endpoints
     Map<String,String> credentialsKeyIdMap = new HashMap<>();
 
+    log.info("Check 1");
+
     credentialsKeyIdMap = writeObjectStoreCredentialsInMantle(objectStoreEndpointList);
 
+    log.info("Check 2");
     // Copy Certs on all PCVM
     certFileUtil.createCertFileOnAllPCVM(new ArrayList<>(objectStoreEndPointDtoMap.values()), false);
 
+    log.info("Check 3");
     // STEP -4 Update all the update entities arg for batch update entities.
     try {
       BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg =
-          BatchUpdateEntitiesArg.newBuilder();
+              BatchUpdateEntitiesArg.newBuilder();
+      log.info("Check 4");
       // Add updateEntityArg in updateEntityArgList.
       addUpdateEntitiesArgForPCBackupSpecs(batchUpdateEntitiesArg);
+      log.info("Check 5");
       // Add update args ZK.
       addUpdateEntitiesArgForPCZkData(batchUpdateEntitiesArg);
+      log.info("Check 6");
       // If this fails then there is no need to rollover the updates.
       if (!makeBatchUpdateRPC(batchUpdateEntitiesArg)) {
+        log.info("Check 7");
         // This will not be thrown to the user.
         throw new PCResilienceException(
                 ErrorMessages.getInsightsServerWriteErrorMessage("prism central backup specs and some other meta"),
@@ -630,30 +679,30 @@ public class PCBackupServiceImpl implements PCBackupService {
       List<String> replicaPEsUuid = new ArrayList<>(peClusterUuidSet);
       replicaPEsUuid.addAll(clusterUuidInPCBackupConfig);
       List<PcObjectStoreEndpoint> objectStoreReplicas =
-          new ArrayList<>(objectStoreEndpointList);
+              new ArrayList<>(objectStoreEndpointList);
       objectStoreReplicas.addAll(objectStoreEndpointInPCBackupConfig);
       Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoAllMap =
-          new HashMap<>(objectStoreEndPointDtoMap);
+              new HashMap<>(objectStoreEndPointDtoMap);
       // have certificate path in dto populate
       Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMapInPcBackupConfig =
-          pcvmDataService.getObjectStoreEndpointDtoMapFromObjectStoreCredentialsBackupEntity(objectStoreCredentialsBackupEntityInPCBackupConfig);
+              pcvmDataService.getObjectStoreEndpointDtoMapFromObjectStoreCredentialsBackupEntity(objectStoreCredentialsBackupEntityInPCBackupConfig);
       objectStoreEndPointDtoAllMap.putAll(objectStoreEndPointDtoMapInPcBackupConfig);
       BatchUpdateEntitiesArg.Builder  batchUpdateEntitiesArgForPcBackupMetadataProto =
-          BatchUpdateEntitiesArg.newBuilder();
+              BatchUpdateEntitiesArg.newBuilder();
       // We need to necessarily add the hosting PE info when there is no
       // entry in pc_backup_config.
       boolean canSkipHostingPEInfo = !(clusterUuidInPCBackupConfig.isEmpty() &&
-                                      objectStoreEndpointInPCBackupConfig.isEmpty());
+              objectStoreEndpointInPCBackupConfig.isEmpty());
       // Not updating sync time as part of the API, it will be updated as
       // part of scheduler.
       boolean updateSyncTimestamp = false;
       addUpdateEntitiesArgForPCBackupMetadata(
-          batchUpdateEntitiesArgForPcBackupMetadataProto,
-          replicaPEsUuid,
-          objectStoreReplicas,
-          objectStoreEndPointDtoAllMap,
-          canSkipHostingPEInfo,
-          updateSyncTimestamp);
+              batchUpdateEntitiesArgForPcBackupMetadataProto,
+              replicaPEsUuid,
+              objectStoreReplicas,
+              objectStoreEndPointDtoAllMap,
+              canSkipHostingPEInfo,
+              updateSyncTimestamp);
       // If this fails then there is no need to rollover the updates.
       if (!makeBatchUpdateRPC(batchUpdateEntitiesArgForPcBackupMetadataProto)) {
         // This will not be thrown to the user.
@@ -665,7 +714,7 @@ public class PCBackupServiceImpl implements PCBackupService {
 
       // STEP - 4
       updateBackupConfigWithRollback(peClusterUuidSet, objectStoreEndpointList, objectStoreEndPointDtoMap,
-                                     credentialsKeyIdMap);
+              credentialsKeyIdMap);
       if (!objectStoreEndpointList.isEmpty()) {
         // Handle the backup state for objectstore endpoints. Following
         // method will ensure these things asynchronously in that order -
@@ -673,9 +722,9 @@ public class PCBackupServiceImpl implements PCBackupService {
         // 2. Handle the pause backup status based on seed data availability.
         // 3. Write object metadata string to S3 if not already present.
         final String pcClusterUuid =
-            instanceServiceFactory.getClusterUuidFromZeusConfig();
+                instanceServiceFactory.getClusterUuidFromZeusConfig();
         objectStoreBackupService.initiateBackupToObjectStoreAsync(
-            objectStoreEndPointDtoMap, pcClusterUuid,
+                objectStoreEndPointDtoMap, pcClusterUuid,
                 entityDBProxy, objectStoreEndpointList);
       }
 
@@ -686,7 +735,7 @@ public class PCBackupServiceImpl implements PCBackupService {
     }
     catch (InsightsInterfaceException e) {
       log.error("Unable to process batchUpdate on the update args " +
-                "provided in the request. Error Message: " + e.getMessage());
+              "provided in the request. Error Message: " + e.getMessage());
       log.debug("Error for batchUpdate while adding replicas: ", e);
       throw new PCResilienceException(ErrorMessages.getInsightsServerWriteErrorMessage("prism central backup"),
               ErrorCode.PCBR_DATABASE_WRITE_BACKUP_DATA_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
@@ -736,7 +785,7 @@ public class PCBackupServiceImpl implements PCBackupService {
     } catch (PCResilienceException e) {
       throw e;
     }
-    ObjectStoreEndpoint objectStoreEndpoint = pcBackupConfig.getObjectStoreEndpoint();
+    PcBackupConfig.ObjectStoreEndpoint objectStoreEndpoint = pcBackupConfig.getObjectStoreEndpoint();
     PcEndpointCredentials pcEndpointCredentials = backupTargets.
             getObjectStoreEndpointList().get(0).getEndpointCredentials();
     ObjectStoreEndPointDto objectStoreEndPointDto;
@@ -745,9 +794,32 @@ public class PCBackupServiceImpl implements PCBackupService {
 
     ergonServiceHelper.updateTask(taskId, 30, ErgonTypes.Task.Status.kRunning);
 
-    log.debug("Checking access for bucket {} with new credentials",bucketName);
-    //Check bucket access against new credentials
+    String certPath = StringUtils.EMPTY;
+    String certificate = StringUtils.EMPTY;
+    ByteString encodedCert = null;
+
+    if (!ObjectUtils.isEmpty(pcEndpointCredentials) && !ObjectUtils.isEmpty(pcEndpointCredentials.getCertificate())){
+      if (!ObjectUtils.isEmpty(objectStoreEndPointDto.getCertificatePath())){
+        certPath = CertificatesUtility.updateCertificatePath(objectStoreEndPointDto.getCertificatePath());
+      } else {
+        certPath = PCBR_OBJECTSTORE_CERTS_PATH +
+                PCUtil.getObjectStoreEndpointUuid(instanceServiceFactory.getClusterUuidFromZeusConfig(),
+                        objectStoreEndpoint.getEndpointAddress()) + PCBR_OBJECTSTORE_CERTS_EXTENSION;
+      }
+      certificate = CertificatesUtility.normalizeAndValidateCertificateContent(pcEndpointCredentials.getCertificate());
+      objectStoreEndPointDto.setCertificatePath(certPath);
+      objectStoreEndPointDto.setCertificateContent(certificate);
+    }
+
+    log.debug("Checking access for bucket {} with new access credentials",bucketName);
+    //Check bucket access against new credentials or certs
     checkBucketAccess(bucketName,objectStoreEndpoint,objectStoreEndPointDto,pcEndpointCredentials);
+
+    if (!ObjectUtils.isEmpty(pcEndpointCredentials) && !ObjectUtils.isEmpty(pcEndpointCredentials.getCertificate())) {
+      certFileUtil.createCertFileOnAllPCVM(Arrays.asList(objectStoreEndPointDto), false);
+      encodedCert = ByteString.copyFrom(Base64.getEncoder().encode(
+              objectStoreEndPointDto.getCertificateContent().getBytes()));
+    }
 
     PCVMBackupTargets pcvmBackupTargets = pcvmDataService.fetchPcvmBackupTargets();
     log.info("Fetched data from backup_metadata {} {}",bucketName,pcvmBackupTargets.getBackupTargetsList());
@@ -765,8 +837,8 @@ public class PCBackupServiceImpl implements PCBackupService {
     rpoConfig.setRpoSeconds(backupTargets.getObjectStoreEndpointList().get(0).getRpoSeconds());
 
     //Update rpo configuration in  pc_backup_config and pc_backup_metadata
-    updateRpoInPcBackupMetadata(bucketName, pcBackupConfig, rpoConfig, pcvmBackupTargets, false, 0, StringUtils.EMPTY);
-    updateRpoAndCredentialsInPcBackupConfigWithRollback(extId, newKeyId, bucketName, pcBackupConfig, rpoConfig, pcvmBackupTargets);
+    updateRpoAndCertsInPcBackupMetadata(bucketName, pcBackupConfig, rpoConfig, pcvmBackupTargets, false, 0, StringUtils.EMPTY, certPath, encodedCert);
+    updateRpoAndCredentialsInPcBackupConfigWithRollback(extId, newKeyId, bucketName, pcBackupConfig, rpoConfig, pcvmBackupTargets, certPath, encodedCert);
 
     // If credentials are valid, erase old credentials from mantle
     if(pcBackupConfig.getObjectStoreEndpoint().hasCredentialsKeyId()) {
@@ -792,12 +864,12 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   private void checkAllowedReplicasCount(Set<String> peClusterUuidSet, List<PcObjectStoreEndpoint> objectStoreEndpointList, List<String> clusterUuidInPCBackupConfig, List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig) throws PCResilienceException {
     if (peClusterUuidSet.size() + clusterUuidInPCBackupConfig.size() >
-        Constants.MAX_ALLOWED_REPLICA_PE) {
+            Constants.MAX_ALLOWED_REPLICA_PE) {
 
       // Raise an exception if the number of replicas requested to be added is
       // more than what's allowed.
       Integer allowedEntries = (Constants.MAX_ALLOWED_REPLICA_PE -
-                                clusterUuidInPCBackupConfig.size());
+              clusterUuidInPCBackupConfig.size());
       String errorMessage = ErrorMessages.getAllowedPeReplicaCountErrorMessage(clusterUuidInPCBackupConfig.size(), allowedEntries);
       log.error(errorMessage);
       Map<String,String> errorArguments = new HashMap<>();
@@ -808,9 +880,9 @@ public class PCBackupServiceImpl implements PCBackupService {
               HttpStatus.BAD_REQUEST,errorArguments);
     }
     if (objectStoreEndpointList.size() +
-        objectStoreEndpointInPCBackupConfig.size() > Constants.MAX_ALLOWED_REPLICA_OBJECT_STORE) {
+            objectStoreEndpointInPCBackupConfig.size() > Constants.MAX_ALLOWED_REPLICA_OBJECT_STORE) {
       Integer allowedEntries = (Constants.MAX_ALLOWED_REPLICA_OBJECT_STORE -
-                                objectStoreEndpointInPCBackupConfig.size());
+              objectStoreEndpointInPCBackupConfig.size());
       String errorMessage = ErrorMessages.getAllowedObjectStoreReplicaCountErrorMessage(
               objectStoreEndpointInPCBackupConfig.size(), allowedEntries);
       log.error(errorMessage);
@@ -831,7 +903,7 @@ public class PCBackupServiceImpl implements PCBackupService {
             pcObjectStoreEndpoint.getEndpointFlavour()
                     .toString());
     ObjectStoreEndPointDto objectStoreEndPointDto =
-        pcvmDataService.getBasicObjectStoreEndpointDtoFromPcObjectStore(pcObjectStoreEndpoint);
+            pcvmDataService.getBasicObjectStoreEndpointDtoFromPcObjectStore(pcObjectStoreEndpoint);
     String endPointAddress = objectStoreHelper.
             validateAndGenerateEndPointAddress(objectStoreEndPointDto);
     pcObjectStoreEndpoint.setEndpointAddress(endPointAddress);
@@ -851,11 +923,11 @@ public class PCBackupServiceImpl implements PCBackupService {
     Set<String> eligibleClusterUuidSet = new HashSet<>();
     // Only fetch eligible cluster list when we receive pe cluster uuid.
     if (!peClusterUuidSet.isEmpty()) {
-        eligibleClusterUuidSet = getEligibleClusterList(isSortingRequired)
-            .getEligibleClusterList()
-            .stream()
-            .map(EligibleCluster::getClusterUuid)
-            .collect(Collectors.toSet());
+      eligibleClusterUuidSet = getEligibleClusterList(isSortingRequired)
+              .getEligibleClusterList()
+              .stream()
+              .map(EligibleCluster::getClusterUuid)
+              .collect(Collectors.toSet());
     }
 
     // looping over peClusterUuidSet, max possible values are 3.
@@ -864,8 +936,8 @@ public class PCBackupServiceImpl implements PCBackupService {
     for (String clusterUuid : peClusterUuidSet) {
       if (!eligibleClusterUuidSet.contains(clusterUuid)) {
         log.error(String.format("%s is not part of eligible Cluster PE for " +
-                                "backup. Unable to proceed further.",
-                                clusterUuid));
+                        "backup. Unable to proceed further.",
+                clusterUuid));
         Map<String,String> errorArguments = new HashMap<>();
         errorArguments.put(ErrorCodeArgumentMapper.ARG_CLUSTER_EXT_ID, clusterUuid);
         throw new PCResilienceException(ErrorMessages.ADD_REPLICA_NON_ELIGIBLE_CLUSTER_ERROR,
@@ -884,16 +956,16 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                               required to be updated.
    * @throws PCResilienceException - Can throw backup exception.
    */
-   void updateBackupConfigWithRollback(Set<String> peClusterUuidSet, List<PcObjectStoreEndpoint> objectStoreEndpointList,
-                                       Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
-                                       Map<String,String> credentialsKeyIdMap)
-      throws PCResilienceException {
+  void updateBackupConfigWithRollback(Set<String> peClusterUuidSet, List<PcObjectStoreEndpoint> objectStoreEndpointList,
+                                      Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
+                                      Map<String,String> credentialsKeyIdMap)
+          throws PCResilienceException {
     // Adding the clusters which were not present in pc_backup_config.
     BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArgForBackupConfig =
-        BatchUpdateEntitiesArg.newBuilder();
+            BatchUpdateEntitiesArg.newBuilder();
     addUpdateEntityArgsForPCBackupConfig(
-        peClusterUuidSet, objectStoreEndpointList, objectStoreEndPointDtoMap, credentialsKeyIdMap,
-        batchUpdateEntitiesArgForBackupConfig);
+            peClusterUuidSet, objectStoreEndpointList, objectStoreEndPointDtoMap, credentialsKeyIdMap,
+            batchUpdateEntitiesArgForBackupConfig);
     // If this fails we will need to roll over the updates.
     if (!makeBatchUpdateRPC(batchUpdateEntitiesArgForBackupConfig)) {
       // If batch-update fails then start the roll over.
@@ -906,9 +978,9 @@ public class PCBackupServiceImpl implements PCBackupService {
         // pc_backup_config uuid is create via the combination of pc_cluster_uuid
         // and endpoint_address.
         String pcUUID =
-            instanceServiceFactory.getClusterUuidFromZeusConfig();
+                instanceServiceFactory.getClusterUuidFromZeusConfig();
         String pcBackupConfigUUID = PCUtil.getObjectStoreEndpointUuid(
-            pcUUID, objectStoreEndpoint.getEndpointAddress());
+                pcUUID, objectStoreEndpoint.getEndpointAddress());
         removeReplica(pcBackupConfigUUID);
       }
       // Rollback the secret credentials stored in mantle service if
@@ -930,10 +1002,10 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                               required to be updated in IDF
    */
   public boolean makeBatchUpdateRPC(
-      BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
+          BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
     try {
       List<String> errorList = IDFUtil.getErrorListAfterBatchUpdateRPC(
-          batchUpdateEntitiesArg, entityDBProxy);
+              batchUpdateEntitiesArg, entityDBProxy);
       if (!errorList.isEmpty()) {
         log.error(errorList.toString());
         return false;
@@ -942,17 +1014,17 @@ public class PCBackupServiceImpl implements PCBackupService {
     }
     catch (InsightsInterfaceException e) {
       log.error("Error encountered while making a" +
-                " batch update call for backup.", e);
+              " batch update call for backup.", e);
     }
     return false;
   }
 
   private void publishPulseData(
-      Set<String> peClusterUuidSet,
-      List<PcObjectStoreEndpoint> pcObjectStoreEndpoints) {
+          Set<String> peClusterUuidSet,
+          List<PcObjectStoreEndpoint> pcObjectStoreEndpoints) {
     try {
       pulsePublisherService.insertReplicaData(peClusterUuidSet,
-                                              pcObjectStoreEndpoints);
+              pcObjectStoreEndpoints);
     }
     catch (Exception e) {
       log.warn("Unable to send pulse data due to ", e);
@@ -1013,7 +1085,7 @@ public class PCBackupServiceImpl implements PCBackupService {
         throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR);
       }
 
-      BackupType backupTargetType =
+      PcBackupConfig.BackupType backupTargetType =
               getBackupType(backupTargetID);
 
       // 0. Check if current backupTargetID is in existing cluster
@@ -1026,8 +1098,8 @@ public class PCBackupServiceImpl implements PCBackupService {
 
       // Get proper ObjectStoreEdnPointDto and PcObjectStoreEndpoint from pcBackupConfig
       ObjectStoreCredentialsBackupEntity objectStoreCredentialsBackupEntity =
-          PCUtil.fetchExistingObjectStoreEndpointInPCBackupConfigWithCredentials(entityDBProxy,
-              instanceServiceFactory.getClusterUuidFromZeusConfig());
+              PCUtil.fetchExistingObjectStoreEndpointInPCBackupConfigWithCredentials(entityDBProxy,
+                      instanceServiceFactory.getClusterUuidFromZeusConfig());
 
       List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig = objectStoreCredentialsBackupEntity.getObjectStoreEndpoints();
 
@@ -1052,15 +1124,15 @@ public class PCBackupServiceImpl implements PCBackupService {
       }
 
       Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap = pcvmDataService.
-          getObjectStoreEndpointDtoMapFromObjectStoreCredentialsBackupEntity(objectStoreCredentialsBackupEntity);
+              getObjectStoreEndpointDtoMapFromObjectStoreCredentialsBackupEntity(objectStoreCredentialsBackupEntity);
 
       // 1. Remove the pc_backup_config with given peClusterUuid
       removeBackupEntity(backupTargetID, currentClusterUuidsInConfig,
-                           objectStoreEndpointInPCBackupConfig, objectStoreEndPointDtoMap);
+              objectStoreEndpointInPCBackupConfig, objectStoreEndPointDtoMap);
 
 
       if (currentClusterUuidsInConfig.isEmpty() &&
-          objectStoreEndpointInPCBackupConfig.isEmpty()) {
+              objectStoreEndpointInPCBackupConfig.isEmpty()) {
 
         // Delete pc_backup_specs entries.
         deletePcBackupSpecsProtoEntities();
@@ -1075,8 +1147,8 @@ public class PCBackupServiceImpl implements PCBackupService {
       pcTaskServiceHelper.updateTaskStatus(taskId, ErgonTypes.Task.Status.kRunning, 40);
       // TODO: Gaurav to add comment for this logic.
       if (backupTargetType == BackupType.kOBJECTSTORE &&
-          objectStoreEndpointInPCBackupConfig.isEmpty() &&
-          !StringUtils.isEmpty(endpointAddressToRemoveFromS3)) {
+              objectStoreEndpointInPCBackupConfig.isEmpty() &&
+              !StringUtils.isEmpty(endpointAddressToRemoveFromS3)) {
         objectStoreBackupService.deletePcSeedDataFromInsightsDb(
                 instanceServiceFactory.getClusterUuidFromZeusConfig());
       }
@@ -1086,7 +1158,7 @@ public class PCBackupServiceImpl implements PCBackupService {
       }
       pulsePublisherService.removeReplicaData(backupTargetID);
       log.info(String.format("Replica with Uuid: %s has been removed",
-                             backupTargetID));
+              backupTargetID));
       pcTaskServiceHelper.updateTaskStatus(taskId, ErgonTypes.Task.Status.kSucceeded, 100);
 
       // 3. if peClusterUuid/ objectstore endpoint was the last entry in
@@ -1115,28 +1187,28 @@ public class PCBackupServiceImpl implements PCBackupService {
   private void removeBackupEntity(String backupTargetID, List<String> currentClusterUuidsInConfig, List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig,
                                   Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap) throws PCResilienceException {
     EntityGuid deleteEntityUuid = EntityGuid.newBuilder()
-                                            .setEntityId(backupTargetID)
-                                            .setEntityTypeName(
-                                                Constants.PC_BACKUP_CONFIG)
-                                            .build();
+            .setEntityId(backupTargetID)
+            .setEntityTypeName(
+                    Constants.PC_BACKUP_CONFIG)
+            .build();
     DeleteEntityArg deleteEntityArg =
-        DeleteEntityArg.newBuilder()
-                       .setEntityGuid(deleteEntityUuid)
-                       .build();
+            DeleteEntityArg.newBuilder()
+                    .setEntityGuid(deleteEntityUuid)
+                    .build();
     try {
       entityDBProxy.deleteEntity(deleteEntityArg);
       // Getting existing cluster uuids from pc_backup_config table in IDF.
       BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg =
-          BatchUpdateEntitiesArg.newBuilder();
+              BatchUpdateEntitiesArg.newBuilder();
       addUpdateEntitiesArgForPCBackupMetadata(batchUpdateEntitiesArg,
-                                              currentClusterUuidsInConfig,
-                                              objectStoreEndpointInPCBackupConfig,
-                                              objectStoreEndPointDtoMap,
-                                              true,
-                                              false);
+              currentClusterUuidsInConfig,
+              objectStoreEndpointInPCBackupConfig,
+              objectStoreEndPointDtoMap,
+              true,
+              false);
 
       List<String> errorList = IDFUtil.getErrorListAfterBatchUpdateRPC(
-          batchUpdateEntitiesArg, entityDBProxy);
+              batchUpdateEntitiesArg, entityDBProxy);
       if (!errorList.isEmpty()) {
         log.error(errorList.toString());
         //todo: verify below message should it be add replica or remove
@@ -1148,7 +1220,7 @@ public class PCBackupServiceImpl implements PCBackupService {
     }
     catch (InsightsInterfaceException e) {
       String errorMessage = String.format("Unable to process deleteEntity %s",
-                                          e);
+              e);
       log.error(errorMessage);
       throw new PCResilienceException(ErrorMessages.getInsightsServerRemoveErrorMessage("prism central backup target"),
               ErrorCode.PCBR_DATABASE_DELETE_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
@@ -1183,16 +1255,16 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   private void deletePcBackupSpecsProtoEntities() throws PCResilienceException {
     GetEntitiesWithMetricsRet pcBackupSpecs =
-        fetchPCBackupSpecsFromIDF();
+            fetchPCBackupSpecsFromIDF();
     List<String> pcBackupSpecsUuids =
-        getEntityIdsFromGetEntitiesWithMetrics(pcBackupSpecs);
+            getEntityIdsFromGetEntitiesWithMetrics(pcBackupSpecs);
     if (!pcBackupSpecsUuids.isEmpty()) {
       boolean isDeleted = IDFUtil.batchDeleteIds(pcBackupSpecsUuids,
-                                                 Constants.PC_BACKUP_SPECS_TABLE,
-                                                 entityDBProxy);
+              Constants.PC_BACKUP_SPECS_TABLE,
+              entityDBProxy);
       if (!isDeleted) {
         String errorMessage = String.format("Unable to delete %s table",
-                                            Constants.PC_BACKUP_SPECS_TABLE);
+                Constants.PC_BACKUP_SPECS_TABLE);
         log.error(errorMessage);
         throw new PCResilienceException(ErrorMessages.getInsightsServerRemoveErrorMessage("prism central backup target"),
                 ErrorCode.PCBR_DATABASE_DELETE_BACKUP_SPECS_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
@@ -1202,33 +1274,33 @@ public class PCBackupServiceImpl implements PCBackupService {
   }
 
   public void deleteStaleZkNodeValuesFromIDF(
-      BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg)
-      throws PCResilienceException {
+          BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg)
+          throws PCResilienceException {
     Set<String> zkEntityIds =
-        batchUpdateEntitiesArg.getEntityListList().stream()
-                              .filter(updateEntityArg ->
-                                          updateEntityArg.getEntityGuid()
-                                                         .getEntityTypeName()
-                                                         .equals(PC_ZK_DATA)
-                                     )
-                              .map(updateEntityArg ->
-                                       updateEntityArg.getEntityGuid()
-                                                      .getEntityId())
-                              .collect(Collectors.toSet());
+            batchUpdateEntitiesArg.getEntityListList().stream()
+                    .filter(updateEntityArg ->
+                            updateEntityArg.getEntityGuid()
+                                    .getEntityTypeName()
+                                    .equals(PC_ZK_DATA)
+                    )
+                    .map(updateEntityArg ->
+                            updateEntityArg.getEntityGuid()
+                                    .getEntityId())
+                    .collect(Collectors.toSet());
     Set<String> zkEntityIdsToDelete = new HashSet<>(fetchZkEntityIdsInIDF());
     zkEntityIdsToDelete.removeAll(zkEntityIds);
     log.debug("Entities required to be deleted in pc_zk_data table - {}",
-              zkEntityIdsToDelete);
+            zkEntityIdsToDelete);
     if (!zkEntityIdsToDelete.isEmpty()) {
       boolean isDeleted = IDFUtil.batchDeleteIds(
-          new ArrayList<>(zkEntityIdsToDelete),
-          PC_ZK_DATA,
-          entityDBProxy);
+              new ArrayList<>(zkEntityIdsToDelete),
+              PC_ZK_DATA,
+              entityDBProxy);
       if (!isDeleted) {
         log.error(String.format("Unable to delete stale entities in %s table," +
-                                " entities are %s", PC_ZK_DATA,
-                                zkEntityIdsToDelete
-                               ));
+                        " entities are %s", PC_ZK_DATA,
+                zkEntityIdsToDelete
+        ));
         throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR,
                 ErrorCode.PCBR_DATABASE_DELETE_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
 
@@ -1252,15 +1324,15 @@ public class PCBackupServiceImpl implements PCBackupService {
    *
    * @throws PCResilienceException - can throw PCResilienceException
    */
-   void deletePcZkDataEntities() throws PCResilienceException {
+  void deletePcZkDataEntities() throws PCResilienceException {
     List<String> pcZkDataUuids = fetchZkEntityIdsInIDF();
     if (!pcZkDataUuids.isEmpty()) {
       boolean isDeleted = IDFUtil.batchDeleteIds(pcZkDataUuids,
-                                                 PC_ZK_DATA,
-                                                 entityDBProxy);
+              PC_ZK_DATA,
+              entityDBProxy);
       if (!isDeleted) {
         log.error(String.format("Unable to delete %s table",
-                                PC_ZK_DATA));
+                PC_ZK_DATA));
         throw new PCResilienceException(ErrorMessages.getInsightsServerRemoveErrorMessage("prism central backup target meta"),
                 ErrorCode.PCBR_DATABASE_DELETE_ERROR,HttpStatus.INTERNAL_SERVER_ERROR);
 
@@ -1275,15 +1347,15 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   public void deletePcBackupMetadataProtoEntity() throws PCResilienceException {
     EntityGuid pcBackupMetadataGuid =
-        EntityGuid.newBuilder()
-                  .setEntityId(instanceServiceFactory
-                                   .getClusterUuidFromZeusConfig())
-                  .setEntityTypeName(Constants.PC_BACKUP_METADATA)
-                  .build();
+            EntityGuid.newBuilder()
+                    .setEntityId(instanceServiceFactory
+                            .getClusterUuidFromZeusConfig())
+                    .setEntityTypeName(Constants.PC_BACKUP_METADATA)
+                    .build();
     DeleteEntityArg pcBackupMetadataDeleteEntityArg =
-        DeleteEntityArg.newBuilder()
-                       .setEntityGuid(pcBackupMetadataGuid)
-                       .build();
+            DeleteEntityArg.newBuilder()
+                    .setEntityGuid(pcBackupMetadataGuid)
+                    .build();
     try {
       entityDBProxy.deleteEntity(pcBackupMetadataDeleteEntityArg);
     }
@@ -1304,8 +1376,8 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                                    InsightsInterfaceException if db update fails.
    */
   public void addUpdateEntitiesArgForPCBackupSpecs(
-      final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg)
-      throws InsightsInterfaceException, PCResilienceException {
+          final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg)
+          throws InsightsInterfaceException, PCResilienceException {
     Map<String, Object> attributesValueMap = new HashMap<>();
     PcBackupSpecsProto.ServiceVersionSpecs serviceVersionSpecs =
             null;
@@ -1314,18 +1386,20 @@ public class PCBackupServiceImpl implements PCBackupService {
     String keyId = fetchOrCreateKeyId();
     // Set keyId and encryption version
     attributesValueMap.put(Constants.PCVM_ENCRYPTION_VERSION,
-                           Constants.ENCRYPTION_VERSION_V1);
+            Constants.ENCRYPTION_VERSION_V1);
     attributesValueMap.put(Constants.PCVM_KEY_ID, keyId);
+    log.info("Check 9");
 
     PcBackupSpecsProto.PCVMSpecs pcvmSpecs =
-        pcvmDataService.constructPCVMSpecs(keyId);
+            pcvmDataService.constructPCVMSpecs(keyId);
+    log.info("Check 9.5");
     attributesValueMap.put(
-        Constants.PCVM_SPECS_ATTRIBUTE,
-        CompressionUtils.compress(
-            pcvmSpecs.toByteString()
-                                 )
-                          );
-
+            Constants.PCVM_SPECS_ATTRIBUTE,
+            CompressionUtils.compress(
+                    pcvmSpecs.toByteString()
+            )
+    );
+    log.info("Check 10");
     if (!pcdrYamlAdapter.getPortfolioServicesToReconcileAfterRestore().isEmpty()) {
       serviceVersionSpecs = getServiceVersionBackupSpecs();
 
@@ -1338,32 +1412,34 @@ public class PCBackupServiceImpl implements PCBackupService {
         );
       }
     }
-
+    log.info("Check 11");
 
     try {
       attributesValueMap.put(
-          Constants.PCVM_CMSP_SPECS,
-          CompressionUtils.compress(
-              pcvmDataService.fetchCMSPSpecs().toByteString()));
+              Constants.PCVM_CMSP_SPECS,
+              CompressionUtils.compress(
+                      pcvmDataService.fetchCMSPSpecs().toByteString()));
     }
     catch (PCResilienceException e) {
       log.warn("Unable to create CMSP spec for backup due to some issue, " +
-               "not storing it as part of backup.", e);
+              "not storing it as part of backup.", e);
     }
     attributesValueMap.put(
-        Constants.PCVM_FILES_ATTRIBUTE,
-        CompressionUtils.compress(
-            pcvmDataService.constructPCVMGeneralFiles(
-                keyId, Constants.ENCRYPTION_VERSION_V1).toByteString()
-                                 )
-                          );
+            Constants.PCVM_FILES_ATTRIBUTE,
+            CompressionUtils.compress(
+                    pcvmDataService.constructPCVMGeneralFiles(
+                            keyId, Constants.ENCRYPTION_VERSION_V1).toByteString()
+            )
+    );
+    log.info("Check 12");
     // Entity ID is the PC Cluster Uuid.
     UpdateEntityArg.Builder updateEntityArgBuilder =
-        IDFUtil.constructUpdateEntityArgBuilder(
-            Constants.PC_BACKUP_SPECS_TABLE,
-            instanceServiceFactory
-                .getClusterUuidFromZeusConfig(),
-            attributesValueMap);
+            IDFUtil.constructUpdateEntityArgBuilder(
+                    Constants.PC_BACKUP_SPECS_TABLE,
+                    instanceServiceFactory
+                            .getClusterUuidFromZeusConfig(),
+                    attributesValueMap);
+    log.info("Check 13");
     updateEntityArgBuilder.setFullUpdate(false);
     batchUpdateEntitiesArg.addEntityList(updateEntityArgBuilder.build());
   }
@@ -1376,7 +1452,7 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                               updateEntityArg will be added.
    */
   public void addUpdateEntitiesArgForPCZkData(
-      final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
+          final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
     pcvmZkService.addUpdateEntitiesArgForPCZkData(batchUpdateEntitiesArg);
   }
 
@@ -1388,29 +1464,29 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                               updateEntityArg will be added.
    */
   public void addUpdateEntitiesArgForPCBackupMetadata(
-      final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg,
-      final List<String> clusterUuidList,
-      List<PcObjectStoreEndpoint> objectStoreEndpointList,
-      Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
-      final boolean canSkipHostingPEInfo,
-      final boolean updateSyncTime)
-      throws PCResilienceException {
+          final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg,
+          final List<String> clusterUuidList,
+          List<PcObjectStoreEndpoint> objectStoreEndpointList,
+          Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
+          final boolean canSkipHostingPEInfo,
+          final boolean updateSyncTime)
+          throws PCResilienceException {
     Map<String, Object> attributesValueMap = new HashMap<>();
 
     // When add-replica is called for the first time, PCVMHostingPEInfo shall
     // not be null, if null a Runtime exception will be raised.
     try {
       attributesValueMap.put(
-          Constants.PCVM_HOSTING_PE_INFO,
-          CompressionUtils.compress(
-              pcvmDataService.constructPCVMHostingPEInfo().toByteString()
-                                   )
-                            );
+              Constants.PCVM_HOSTING_PE_INFO,
+              CompressionUtils.compress(
+                      pcvmDataService.constructPCVMHostingPEInfo().toByteString()
+              )
+      );
     }
     catch (PCResilienceException e) {
       if (canSkipHostingPEInfo) {
         log.warn("PC is not connected to the hosting PE. Unable to update " +
-                 "backup data.", e);
+                "backup data.", e);
       }
       else {
         throw e;
@@ -1419,32 +1495,32 @@ public class PCBackupServiceImpl implements PCBackupService {
 
     // This should always be present.
     attributesValueMap.put(
-        Constants.PCVM_BACKUP_TARGETS,
-        CompressionUtils.compress(
-            pcvmDataService.constructPCVMBackupTargets(clusterUuidList,
-                                                       objectStoreEndpointList,
-                                                       objectStoreEndPointDtoMap,
-                                                       updateSyncTime)
-                           .toByteString()
-                                 )
-                          );
+            Constants.PCVM_BACKUP_TARGETS,
+            CompressionUtils.compress(
+                    pcvmDataService.constructPCVMBackupTargets(clusterUuidList,
+                                    objectStoreEndpointList,
+                                    objectStoreEndPointDtoMap,
+                                    updateSyncTime)
+                            .toByteString()
+            )
+    );
 
     // Added for both backup on Cluster and ObjectStore, but used only for Cluster.
     // For ObjectStore backup this info is stored in ObjectStore.
     attributesValueMap.put(
-        Constants.DOMAIN_MANAGER_IDENTIFIER,
-        CompressionUtils.compress(
-            pcvmDataService.constructDomainManagerIdentifier().toByteString()
-        )
+            Constants.DOMAIN_MANAGER_IDENTIFIER,
+            CompressionUtils.compress(
+                    pcvmDataService.constructDomainManagerIdentifier().toByteString()
+            )
     );
 
     // Entity ID is the PC Cluster Uuid.
     UpdateEntityArg.Builder updateEntityArgBuilder =
-        IDFUtil.constructUpdateEntityArgBuilder(
-            Constants.PC_BACKUP_METADATA,
-            instanceServiceFactory
-                .getClusterUuidFromZeusConfig(),
-            attributesValueMap);
+            IDFUtil.constructUpdateEntityArgBuilder(
+                    Constants.PC_BACKUP_METADATA,
+                    instanceServiceFactory
+                            .getClusterUuidFromZeusConfig(),
+                    attributesValueMap);
     updateEntityArgBuilder.setFullUpdate(false);
     batchUpdateEntitiesArg.addEntityList(updateEntityArgBuilder.build());
   }
@@ -1457,56 +1533,55 @@ public class PCBackupServiceImpl implements PCBackupService {
    *                         has to be updated.
    */
   public void addUpdateEntityArgsForPCBackupConfig(
-      final Set<String> peClusterUuidSet,
-      List<PcObjectStoreEndpoint> objectStoreEndpointList,
-      Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
-      Map<String,String> credentialKeyIdMap,
-      final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
+          final Set<String> peClusterUuidSet,
+          List<PcObjectStoreEndpoint> objectStoreEndpointList,
+          Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap,
+          Map<String,String> credentialKeyIdMap,
+          final BatchUpdateEntitiesArg.Builder batchUpdateEntitiesArg) {
     List<UpdateEntityArg> updateEntityArgList = new ArrayList<>();
     for (String peClusterUuid : peClusterUuidSet) {
       Map<String, Object> attributesValueMap = new HashMap<>();
 
       attributesValueMap.put(
-          Constants.ZPROTOBUF,
-          CompressionUtils.compress(
-              PcBackupConfig.newBuilder()
-                            .setClusterUuid(peClusterUuid)
-                            .setBackupType(BackupType.kPE)
-                            .build()
-                            .toByteString()
-                                   )
-                            );
+              Constants.ZPROTOBUF,
+              CompressionUtils.compress(
+                      PcBackupConfig.newBuilder()
+                              .setClusterUuid(peClusterUuid)
+                              .setBackupType(BackupType.kPE)
+                              .build()
+                              .toByteString()
+              )
+      );
       UpdateEntityArg.Builder updateEntityArgBuilder =
-          IDFUtil.constructUpdateEntityArgBuilder(
-              Constants.PC_BACKUP_CONFIG,
-              peClusterUuid,
-              // Entity Id being set as PE cluster uuid.
-              attributesValueMap);
+              IDFUtil.constructUpdateEntityArgBuilder(
+                      Constants.PC_BACKUP_CONFIG,
+                      peClusterUuid,
+                      // Entity Id being set as PE cluster uuid.
+                      attributesValueMap);
       updateEntityArgList.add(updateEntityArgBuilder.build());
     }
     for (PcObjectStoreEndpoint objectStoreEndpoint : objectStoreEndpointList) {
       ObjectStoreEndPointDto objectStoreEndPointDto = objectStoreEndPointDtoMap.get(objectStoreEndpoint.getEndpointAddress());
       Map<String, Object> attributesValueMap = new HashMap<>();
       ObjectStoreEndpoint.Builder objectStoreEndpointProtoBuilder =
-          ObjectStoreEndpoint.newBuilder()
-                             .setEndpointAddress(
-                                 objectStoreEndpoint.getEndpointAddress())
-                             .setEndpointFlavour(EndpointFlavour.forNumber(
-                                 objectStoreEndpoint.getEndpointFlavour()
-                                                    .ordinal()))
-                             .setBackupRetentionDays(objectStoreEndpoint.getBackupRetentionDays())
-                             .setBucketName(objectStoreEndpoint.getBucket())
-                             .setRegion(objectStoreEndpoint.getRegion());
+              ObjectStoreEndpoint.newBuilder()
+                      .setEndpointAddress(
+                              objectStoreEndpoint.getEndpointAddress())
+                      .setEndpointFlavour(EndpointFlavour.forNumber(
+                              objectStoreEndpoint.getEndpointFlavour()
+                                      .ordinal()))
+                      .setBackupRetentionDays(objectStoreEndpoint.getBackupRetentionDays())
+                      .setBucketName(objectStoreEndpoint.getBucket())
+                      .setRegion(objectStoreEndpoint.getRegion());
 
       if (objectStoreEndpoint.getEndpointFlavour().toString().equals(PcEndpointFlavour.KOBJECTS.toString())) {
         objectStoreEndpointProtoBuilder
-            .setPathStyleEnabled(objectStoreEndPointDto.isPathStyle())
-            .setSkipCertificateValidation(objectStoreEndPointDto.isSkipCertificateValidation());
-        if (!ObjectUtils.isEmpty(objectStoreEndPointDto.getCertificatePath())) {
+                .setPathStyleEnabled(objectStoreEndPointDto.isPathStyle())
+                .setSkipCertificateValidation(objectStoreEndPointDto.isSkipCertificateValidation());
+        if (!objectStoreEndPointDto.isSkipCertificateValidation() && !ObjectUtils.isEmpty(objectStoreEndPointDto.getCertificatePath())) {
           objectStoreEndpointProtoBuilder.setCertificatePath(objectStoreEndPointDto.getCertificatePath());
         }
       }
-
 
       if(StringUtils.isNotEmpty(credentialKeyIdMap.get(objectStoreEndpoint.getEndpointAddress()))){
         objectStoreEndpointProtoBuilder.setCredentialsKeyId(credentialKeyIdMap.get(objectStoreEndpoint.getEndpointAddress()));
@@ -1515,30 +1590,30 @@ public class PCBackupServiceImpl implements PCBackupService {
       ObjectStoreEndpoint objectStoreEndpointProto = objectStoreEndpointProtoBuilder.build();
 
       attributesValueMap.put(
-          Constants.ZPROTOBUF,
-          CompressionUtils.compress(
-              PcBackupConfig.newBuilder()
-                            .setObjectStoreEndpoint(objectStoreEndpointProto)
-                            .setBackupType(
-                                BackupType.kOBJECTSTORE)
-                            .setRpoSecs(objectStoreEndpoint.getRpoSeconds())
-                            .setPauseBackup(true)
-                            .setPauseBackupMessage(Messages.PauseBackupMessagesEnum.GATHERING_DATA.name())
-                            .build()
-                            .toByteString()
-                                   )
-                            );
+              Constants.ZPROTOBUF,
+              CompressionUtils.compress(
+                      PcBackupConfig.newBuilder()
+                              .setObjectStoreEndpoint(objectStoreEndpointProto)
+                              .setBackupType(
+                                      BackupType.kOBJECTSTORE)
+                              .setRpoSecs(objectStoreEndpoint.getRpoSeconds())
+                              .setPauseBackup(true)
+                              .setPauseBackupMessage(Messages.PauseBackupMessagesEnum.GATHERING_DATA.name())
+                              .build()
+                              .toByteString()
+              )
+      );
       // pc_backup_config uuid is create via the combination of pc_cluster_uuid
       // and endpoint_address.
       String pcUUID =
-          instanceServiceFactory.getClusterUuidFromZeusConfig();
+              instanceServiceFactory.getClusterUuidFromZeusConfig();
       UpdateEntityArg.Builder updateEntityArgBuilder =
-          IDFUtil.constructUpdateEntityArgBuilder(
-              Constants.PC_BACKUP_CONFIG,
-              PCUtil.getObjectStoreEndpointUuid(
-                  pcUUID, objectStoreEndpoint.getEndpointAddress()),
-              // Entity Id being set as PE cluster uuid.
-              attributesValueMap);
+              IDFUtil.constructUpdateEntityArgBuilder(
+                      Constants.PC_BACKUP_CONFIG,
+                      PCUtil.getObjectStoreEndpointUuid(
+                              pcUUID, objectStoreEndpoint.getEndpointAddress()),
+                      // Entity Id being set as PE cluster uuid.
+                      attributesValueMap);
       updateEntityArgList.add(updateEntityArgBuilder.build());
     }
     batchUpdateEntitiesArg.addAllEntityList(updateEntityArgList);
@@ -1550,12 +1625,12 @@ public class PCBackupServiceImpl implements PCBackupService {
    * for these PEs
    */
   public BackupTargetsInfo getReplicas() throws PCResilienceException {
-    PCVMBackupTargets pcvmBackupTargets;
+    PcBackupMetadataProto.PCVMBackupTargets pcvmBackupTargets;
     try {
       pcvmBackupTargets = PcdrProtoUtil.fetchBackupTargetFromPcBackupMetadata(
-          instanceServiceFactory.getClusterUuidFromZeusConfig(), entityDBProxy);
+              instanceServiceFactory.getClusterUuidFromZeusConfig(), entityDBProxy);
       log.debug("Fetched replica UUID's from pc_backup_metadata. {}",
-                pcvmBackupTargets);
+              pcvmBackupTargets);
     } catch (Exception e) {
       log.error("Unable to fetch pc_backup_metadata from IDF due to exception : ", e);
       ExceptionDetailsDTO exceptionDetails = ExceptionUtil.getExceptionDetails(e,
@@ -1564,27 +1639,27 @@ public class PCBackupServiceImpl implements PCBackupService {
               exceptionDetails.getHttpStatus(),exceptionDetails.getArguments());
     }
     List<PcBackupConfig> pcBackupConfigs =
-        backupStatus.fetchPcBackupConfigProtoList();
+            backupStatus.fetchPcBackupConfigProtoList();
 
     BackupTargetsInfo backupTargetsInfo = new BackupTargetsInfo();
     if (pcBackupConfigs.isEmpty()) {
       log.warn("No entity found in pc_backup_config table. " +
-               "pc_backup_metadata should have been empty.");
+              "pc_backup_metadata should have been empty.");
     }
     List<ObjectStoreEndpointInfo> objectStoreEndpointInfoList =
-        Collections.emptyList();
+            Collections.emptyList();
     List<PEInfo> peInfoList = Collections.emptyList();
     if (pcvmBackupTargets != null && !pcBackupConfigs.isEmpty()) {
       objectStoreEndpointInfoList =
-          getObjectStoreReplicas(pcBackupConfigs,
-                                 pcvmBackupTargets.getObjectStoreBackupTargetsList());
+              getObjectStoreReplicas(pcBackupConfigs,
+                      pcvmBackupTargets.getObjectStoreBackupTargetsList());
       peInfoList = getPEInfoReplicas(
-          pcBackupConfigs,
-          pcvmBackupTargets.getBackupTargetsList());
+              pcBackupConfigs,
+              pcvmBackupTargets.getBackupTargetsList());
     }
     backupTargetsInfo.setPeInfoList(peInfoList);
     backupTargetsInfo.setObjectStoreEndpointInfoList(
-        objectStoreEndpointInfoList);
+            objectStoreEndpointInfoList);
     return backupTargetsInfo;
   }
 
@@ -1600,22 +1675,22 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   List<PEInfo> getPEInfoReplicas(List<PcBackupConfig> pcBackupConfigs,
                                  List<PCVMBackupTargets.BackupTarget> backupTargets)
-      throws PCResilienceException {
+          throws PCResilienceException {
     List<PEInfo> peInfoList = new ArrayList<>();
     HashMap<String, PcBackupConfig> clusterUuidInPcBackupConfig =
-        new HashMap<>();
+            new HashMap<>();
     pcBackupConfigs.forEach(pcBackupConfig -> {
       if (pcBackupConfig.hasClusterUuid() &&
-          !pcBackupConfig.getClusterUuid().isEmpty()) {
+              !pcBackupConfig.getClusterUuid().isEmpty()) {
         clusterUuidInPcBackupConfig.put(
-            pcBackupConfig.getClusterUuid(),
-            pcBackupConfig);
+                pcBackupConfig.getClusterUuid(),
+                pcBackupConfig);
       }
     });
     for (PCVMBackupTargets.BackupTarget backupTarget : backupTargets) {
       if (clusterUuidInPcBackupConfig.containsKey(backupTarget.getClusterUuid())) {
         PcBackupConfig currentPcBackupConfig =
-            clusterUuidInPcBackupConfig.get(backupTarget.getClusterUuid());
+                clusterUuidInPcBackupConfig.get(backupTarget.getClusterUuid());
         PEInfo peInfo = new PEInfo();
         peInfo.setPeClusterId(backupTarget.getClusterUuid());
         peInfo.setPeName(backupTarget.getName());
@@ -1623,7 +1698,7 @@ public class PCBackupServiceImpl implements PCBackupService {
         peInfo.setLastSyncTimestamp(backupTarget.getLastSyncTimestamp());
         if (currentPcBackupConfig.getPauseBackup()) {
           peInfo.setPauseBackupMessage(
-              getPauseBackupMessage(currentPcBackupConfig));
+                  getPauseBackupMessage(currentPcBackupConfig));
         }
         peInfoList.add(peInfo);
       }
@@ -1631,7 +1706,7 @@ public class PCBackupServiceImpl implements PCBackupService {
         // It will be updated whenever the scheduler will run so that there
         // is consistency.
         log.warn("The {} PE cluster uuid is not part of pc_backup_config.",
-                 backupTarget.getClusterUuid());
+                backupTarget.getClusterUuid());
       }
     }
     return peInfoList;
@@ -1648,64 +1723,64 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException - can raise pc backup exception.
    */
   List<ObjectStoreEndpointInfo> getObjectStoreReplicas(
-      List<PcBackupConfig> pcBackupConfigs,
-      List<ObjectStoreBackupTarget> objectStoreBackupTargets)
-      throws PCResilienceException {
+          List<PcBackupConfig> pcBackupConfigs,
+          List<ObjectStoreBackupTarget> objectStoreBackupTargets)
+          throws PCResilienceException {
     List<ObjectStoreEndpointInfo> objectStoreEndpointInfoList =
-        new ArrayList<>();
+            new ArrayList<>();
     // Create a hashmap containing object store address and pc backup config.
     // Use the same to check if
     HashMap<String, PcBackupConfig> objectStoreAddressInPcBackupConfig =
-        new HashMap<>();
+            new HashMap<>();
     pcBackupConfigs.forEach(pcBackupConfig -> {
       if (pcBackupConfig.hasObjectStoreEndpoint()) {
         objectStoreAddressInPcBackupConfig.put(
-            pcBackupConfig.getObjectStoreEndpoint().getEndpointAddress(),
-            pcBackupConfig);
+                pcBackupConfig.getObjectStoreEndpoint().getEndpointAddress(),
+                pcBackupConfig);
       }
     });
     if (objectStoreBackupTargets != null) {
       String pcUUID =
-          instanceServiceFactory.getClusterUuidFromZeusConfig();
+              instanceServiceFactory.getClusterUuidFromZeusConfig();
       for (ObjectStoreBackupTarget objectStoreBackupTarget : objectStoreBackupTargets) {
         if (!objectStoreAddressInPcBackupConfig.containsKey(
-            objectStoreBackupTarget.getEndpointAddress())) {
+                objectStoreBackupTarget.getEndpointAddress())) {
           // It will be updated whenever the scheduler will run so that there
           // is consistency.
           log.warn("The {} endpoint address is not part of pc_backup_config.",
-                   objectStoreBackupTarget.getEndpointAddress());
+                  objectStoreBackupTarget.getEndpointAddress());
           continue;
         }
         PcBackupConfig currentPcBackupConfig =
-            objectStoreAddressInPcBackupConfig.get(
-                objectStoreBackupTarget.getEndpointAddress());
+                objectStoreAddressInPcBackupConfig.get(
+                        objectStoreBackupTarget.getEndpointAddress());
         String pcBackupConfigUUID = PCUtil.getObjectStoreEndpointUuid(
-            pcUUID, objectStoreBackupTarget.getEndpointAddress());
+                pcUUID, objectStoreBackupTarget.getEndpointAddress());
         ObjectStoreEndpointInfo objectStoreEndpointInfo =
-            new ObjectStoreEndpointInfo();
+                new ObjectStoreEndpointInfo();
         PcObjectStoreEndpoint pcObjectStoreEndpoint =
-            new PcObjectStoreEndpoint();
+                new PcObjectStoreEndpoint();
         pcObjectStoreEndpoint.setBucket(objectStoreBackupTarget.getBucketName());
         pcObjectStoreEndpoint.setRegion(objectStoreBackupTarget.getRegion());
-        if (!objectStoreBackupTarget.getEndpointFlavour().toString().equalsIgnoreCase(PcEndpointFlavour.KS3.toString())) {
+        if (objectStoreBackupTarget.getEndpointFlavour().toString().equalsIgnoreCase(PcEndpointFlavour.KOBJECTS.toString())) {
           pcObjectStoreEndpoint.setIpAddressOrDomain(S3ObjectStoreUtil.getHostnameOrIPFromEndpointAddress(
-              objectStoreBackupTarget.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
+                  objectStoreBackupTarget.getEndpointAddress(), IS_PATH_STYLE_ENDPOINT_ADDRESS_STORED_IN_IDF));
           pcObjectStoreEndpoint.setHasCustomCertificate(!ObjectUtils.isEmpty(objectStoreBackupTarget.getCertificatePath()));
           pcObjectStoreEndpoint.setSkipCertificateValidation(objectStoreBackupTarget.getSkipCertificateValidation());
         }
         pcObjectStoreEndpoint.setEndpointFlavour(
-            PcEndpointFlavour.fromString(
-                objectStoreBackupTarget.getEndpointFlavour().toString()));
+                PcEndpointFlavour.fromString(
+                        objectStoreBackupTarget.getEndpointFlavour().toString()));
         pcObjectStoreEndpoint.setRpoSeconds(currentPcBackupConfig.getRpoSecs());
         objectStoreEndpointInfo.setObjectStoreEndpoint(pcObjectStoreEndpoint);
         objectStoreEndpointInfo.setIsBackupPaused(
-            currentPcBackupConfig.getPauseBackup());
+                currentPcBackupConfig.getPauseBackup());
         objectStoreEndpointInfo.setLastSyncTimestamp(
-            objectStoreBackupTarget.getLastSyncTimestamp());
+                objectStoreBackupTarget.getLastSyncTimestamp());
         objectStoreEndpointInfo.setEntityId(pcBackupConfigUUID);
         if (currentPcBackupConfig.getPauseBackup()) {
           objectStoreEndpointInfo.setPauseBackupMessage(
-              getPauseBackupMessage(currentPcBackupConfig));
+                  getPauseBackupMessage(currentPcBackupConfig));
         }
         objectStoreEndpointInfoList.add(objectStoreEndpointInfo);
       }
@@ -1721,19 +1796,19 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException - can raise PC backup exception.
    */
   private String getPauseBackupMessage(PcBackupConfig pcBackupConfig)
-      throws PCResilienceException {
+          throws PCResilienceException {
     String pauseBackupDetailedMessage = "";
     if (!StringUtils.isEmpty(
-        pcBackupConfig.getPauseBackupMessage())) {
+            pcBackupConfig.getPauseBackupMessage())) {
       try {
         pauseBackupDetailedMessage =
-            Messages.PauseBackupMessagesEnum.valueOf(
-                        pcBackupConfig.getPauseBackupMessage())
-                                            .getPauseBackupDetailedMessage();
+                Messages.PauseBackupMessagesEnum.valueOf(
+                                pcBackupConfig.getPauseBackupMessage())
+                        .getPauseBackupDetailedMessage();
       }
       catch (IllegalArgumentException e) {
         log.error("Pause backup message stored in IDF is not part of" +
-                  " PauseBackupMessagesEnum.", e);
+                " PauseBackupMessagesEnum.", e);
         throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR);
       }
     }
@@ -1753,11 +1828,11 @@ public class PCBackupServiceImpl implements PCBackupService {
     List<String> rawColumns = new ArrayList<>();
     rawColumns.add(Constants.PCVM_KEY_ID);
     Query query = QueryUtil
-        .constructPcBackupSpecsProtoQuery(clusterUuid, rawColumns);
+            .constructPcBackupSpecsProtoQuery(clusterUuid, rawColumns);
     GetEntitiesWithMetricsRet result;
     try {
       result = entityDBProxy.getEntitiesWithMetrics(
-          GetEntitiesWithMetricsArg.newBuilder().setQuery(query).build());
+              GetEntitiesWithMetricsArg.newBuilder().setQuery(query).build());
     }
     catch (InsightsInterfaceException e) {
       String error = "Querying pc_backup_specs from IDF failed.";
@@ -1766,10 +1841,10 @@ public class PCBackupServiceImpl implements PCBackupService {
               ErrorCode.PCBR_DATABASE_READ_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
     }
     if (result != null && !result.getGroupResultsListList().isEmpty() &&
-        !result.getGroupResultsList(0).getRawResultsList().isEmpty()) {
+            !result.getGroupResultsList(0).getRawResultsList().isEmpty()) {
       DataValue dataValueKeyId = IDFUtil.getAttributeValueInEntityMetric(
-          Constants.PCVM_KEY_ID,
-          result.getGroupResultsList(0).getRawResults(0));
+              Constants.PCVM_KEY_ID,
+              result.getGroupResultsList(0).getRawResults(0));
       assert dataValueKeyId != null;
       return dataValueKeyId.getStrValue();
     }
@@ -1785,7 +1860,7 @@ public class PCBackupServiceImpl implements PCBackupService {
    *
    */
   public void resetBackupSyncStates()
-      throws PCResilienceException {
+          throws PCResilienceException {
 
     String serializedReplicaPEUuids = null;
 
@@ -1797,7 +1872,7 @@ public class PCBackupServiceImpl implements PCBackupService {
       Stat stat = zookeeperServiceHelper.exists(IDF_BACKUP_SYNC_STATES_ZK_PATH, false);
       if (stat == null) {
         log.info("IDF_BACKUP_SYNC_STATES zkNode does not exists so just " +
-                 "return");
+                "return");
         return;
       }
 
@@ -1807,57 +1882,57 @@ public class PCBackupServiceImpl implements PCBackupService {
 
       if (serializedReplicaPEUuids.equals(Constants.NO_DATA_ZK_VALUE)) {
         log.warn("Since there are no PE nodes for which reset IDF sync " +
-                 "state needs to be triggered, so skipping the reset IDF sync states flow");
+                "state needs to be triggered, so skipping the reset IDF sync states flow");
         return;
       }
       List<String> replicaPEUuids = Arrays.asList(serializedReplicaPEUuids.split(","));
 
       log.info(
-          "List of PE Uuids for which reset IDF sync state would be triggered: {}",
-          replicaPEUuids);
+              "List of PE Uuids for which reset IDF sync state would be triggered: {}",
+              replicaPEUuids);
 
       // Build CompletableFuture objects for each PE Uuid for which reset IDF Sync needs to be triggered.
       List<CompletableFuture<Boolean>> resetBackupSyncStateFutureList
-          = replicaPEUuids.stream().map(this::resetBackupSyncStateForPE)
-                          .collect(
-                              Collectors.toList());
+              = replicaPEUuids.stream().map(this::resetBackupSyncStateForPE)
+              .collect(
+                      Collectors.toList());
 
       CompletableFuture.allOf(resetBackupSyncStateFutureList.toArray(
-          new CompletableFuture[resetBackupSyncStateFutureList.size()]));
+              new CompletableFuture[resetBackupSyncStateFutureList.size()]));
 
       for (int i = 0; i < resetBackupSyncStateFutureList.size(); i++) {
         CompletableFuture<Boolean> future = resetBackupSyncStateFutureList.get(
-            i);
+                i);
 
         if (!future.get()) {
           log.error(
-              "Reset IDF Sync State was not successful for PE with Uuid: {}",
-              replicaPEUuids.get(i));
+                  "Reset IDF Sync State was not successful for PE with Uuid: {}",
+                  replicaPEUuids.get(i));
           pendingReplicaPEUuids.add(replicaPEUuids.get(i));
           continue;
         }
         log.info("Reset IDF Sync State was successful for PE with Uuid: {}",
-                 replicaPEUuids.get(i));
+                replicaPEUuids.get(i));
       }
 
       log.info(
-          "List of PE Uuids for which reset IDF sync state was not successful " +
-          "this time and would be triggered again in next scheduler cycle: {}",
-          pendingReplicaPEUuids);
+              "List of PE Uuids for which reset IDF sync state was not successful " +
+                      "this time and would be triggered again in next scheduler cycle: {}",
+              pendingReplicaPEUuids);
 
       // Serialize the list of PE Uuids as data needs to be stored on zkNode in Byte format
       serializedReplicaPEUuids = pendingReplicaPEUuids.isEmpty() ?
-                                 Constants.NO_DATA_ZK_VALUE :
-                                 String.join(",", pendingReplicaPEUuids);
+              Constants.NO_DATA_ZK_VALUE :
+              String.join(",", pendingReplicaPEUuids);
 
       log.info("Writing the PE Uuid list: {} for which reset IDF Sync state " +
-               "was not successful" +
-               "back to zkNode", serializedReplicaPEUuids);
+              "was not successful" +
+              "back to zkNode", serializedReplicaPEUuids);
       zookeeperServiceHelper.setData(IDF_BACKUP_SYNC_STATES_ZK_PATH,
-                       serializedReplicaPEUuids.getBytes(), stat.getVersion());
+              serializedReplicaPEUuids.getBytes(), stat.getVersion());
     } catch (Exception e) {
       log.error("Error encountered while invoking " +
-                "DeleteClusterReplicationState RPC call on replica PE's ", e);
+              "DeleteClusterReplicationState RPC call on replica PE's ", e);
       throw new PCResilienceException(ErrorMessages.INTERNAL_SERVER_ERROR);
     }
   }
@@ -1875,31 +1950,31 @@ public class PCBackupServiceImpl implements PCBackupService {
     return CompletableFuture.supplyAsync(() -> {
       try {
         DeleteClusterReplicationStateArg.Builder deleteClusterReplicationStateArg =
-            DeleteClusterReplicationStateArg.newBuilder();
+                DeleteClusterReplicationStateArg.newBuilder();
         deleteClusterReplicationStateArg.setClusterUuid(peUuid);
         deleteClusterReplicationStateArg.setDeleteBackupReplicationState(true);
         DeleteClusterReplicationStateArg rpcArgs =
-            deleteClusterReplicationStateArg.build();
+                deleteClusterReplicationStateArg.build();
 
         log.info("Initiating DeleteClusterReplicationState RPC call for PE " +
-                 "with Uuid: {} with Rpc Args: {}", peUuid, rpcArgs);
+                "with Uuid: {} with Rpc Args: {}", peUuid, rpcArgs);
         DeleteClusterReplicationStateRet deleteClusterReplicationStateRet =
-            insightsFanoutClient.invokeFanoutCall(
-                MercuryFanoutRpcClient.RpcName.DELETE_CLUSTER_REPLICATION_STATE,
-                rpcArgs,
-                DeleteClusterReplicationStateRet.newBuilder(),
-                peUuid);
+                insightsFanoutClient.invokeFanoutCall(
+                        MercuryFanoutRpcClient.RpcName.DELETE_CLUSTER_REPLICATION_STATE,
+                        rpcArgs,
+                        DeleteClusterReplicationStateRet.newBuilder(),
+                        peUuid);
 
         log.info("Completed DeleteClusterReplicationState RPC call for PE " +
-                 "with Uuid: {} with status: {}", peUuid,
-                 deleteClusterReplicationStateRet);
+                        "with Uuid: {} with status: {}", peUuid,
+                deleteClusterReplicationStateRet);
         return Boolean.TRUE;
       }
       catch (Exception e) {
         log.error(String.format("Error encountered while invoking " +
-                                "DeleteClusterReplicationState RPC call for " +
-                                "PE with Uuid: %s",
-                                peUuid), e);
+                        "DeleteClusterReplicationState RPC call for " +
+                        "PE with Uuid: %s",
+                peUuid), e);
         return Boolean.FALSE;
       }
     });
@@ -1922,7 +1997,7 @@ public class PCBackupServiceImpl implements PCBackupService {
       Stat stat = zookeeperServiceHelper.exists(IDF_BACKUP_SYNC_STATES_ZK_PATH, false);
       if (stat == null) {
         log.info("IDF_BACKUP_SYNC_STATES zkNode does not exists, so returning" +
-                 "from updateIdfSyncStateZkNode");
+                "from updateIdfSyncStateZkNode");
         return;
       }
       // Read the list of PE Uuids for which reset IDF sync needs to be triggered
@@ -1931,33 +2006,33 @@ public class PCBackupServiceImpl implements PCBackupService {
       serializedReplicaPEUuids = new String(data);
       if (serializedReplicaPEUuids.equals(Constants.NO_DATA_ZK_VALUE)) {
         log.warn("Since there are no replicaPE's for which reset IDF sync " +
-                 "needs to be invoked, so returning from updateIdfSyncStateZkNode");
+                "needs to be invoked, so returning from updateIdfSyncStateZkNode");
         return;
       }
       replicaPEUuids = Arrays.asList(serializedReplicaPEUuids.split(","));
       log.info("List of ReplicaPE UUIDs for which reset IDF sync is being " +
-               "triggered till now: {}",
-               replicaPEUuids);
+                      "triggered till now: {}",
+              replicaPEUuids);
 
       // code to check if specific uuid is present,if yes then it removes it
       replicaPEUuids = replicaPEUuids
-          .stream().filter(e -> !e.equalsIgnoreCase(peClusterUuid))
-          .collect(Collectors.toList());
+              .stream().filter(e -> !e.equalsIgnoreCase(peClusterUuid))
+              .collect(Collectors.toList());
 
       serializedReplicaPEUuids = replicaPEUuids.isEmpty() ?
-                                 Constants.NO_DATA_ZK_VALUE :
-                                 String.join(",", replicaPEUuids);
+              Constants.NO_DATA_ZK_VALUE :
+              String.join(",", replicaPEUuids);
 
       log.info("Updated list of ReplicaPE UUID's for which reset IDF sync " +
-               "needs to be triggered afer removing ReplicaPE with UUID: {}: " +
-               " {}", peClusterUuid, serializedReplicaPEUuids);
+              "needs to be triggered afer removing ReplicaPE with UUID: {}: " +
+              " {}", peClusterUuid, serializedReplicaPEUuids);
 
       zookeeperServiceHelper.setData(IDF_BACKUP_SYNC_STATES_ZK_PATH,
-                       serializedReplicaPEUuids.getBytes(), stat.getVersion());
+              serializedReplicaPEUuids.getBytes(), stat.getVersion());
     }
     catch (Exception e) {
       log.error("Error encountered while updating list of ReplicaPE UUID's on" +
-                " IDF_BACKUP_SYNC_STATES zknode", e);
+              " IDF_BACKUP_SYNC_STATES zknode", e);
     }
   }
 
@@ -1968,7 +2043,7 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException - can throw PC backup exception.
    */
   public Map<String, String> writeObjectStoreCredentialsInMantle(List<PcObjectStoreEndpoint> pcObjectStoreEndpointList)
-      throws PCResilienceException {
+          throws PCResilienceException {
     Map<String, String> credentialsKeyIdMap = new HashMap<>();
     for (PcObjectStoreEndpoint pcObjectStoreEndpoint : pcObjectStoreEndpointList) {
       String credentialkey;
@@ -1976,16 +2051,16 @@ public class PCBackupServiceImpl implements PCBackupService {
       if (endpointCredentials != null && StringUtils.isNotEmpty(endpointCredentials.getAccessKey()) && StringUtils.isNotEmpty(endpointCredentials.getSecretAccessKey())) {
         try {
           ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-              S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(endpointCredentials);
+                  S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(endpointCredentials);
           // fetch the mantle key from mantle service using object credentials proto
           credentialkey = mantleUtils.writeSecret(objectStoreCredentialsProto);
           log.debug("Credential Key Id for objectstore endpoint address {} is {}",
-                   pcObjectStoreEndpoint.getEndpointAddress(), credentialkey);
+                  pcObjectStoreEndpoint.getEndpointAddress(), credentialkey);
           credentialsKeyIdMap.put(pcObjectStoreEndpoint.getEndpointAddress(), credentialkey);
         }
         catch (MantleException e) {
           log.error("Failed to store secrets in Mantle for {} with exception {} ",
-                    pcObjectStoreEndpoint.getEndpointAddress(), e.getMessage());
+                  pcObjectStoreEndpoint.getEndpointAddress(), e.getMessage());
           // Deleting the secret from mantle service executed successfully from objectstorelist
           if(!credentialsKeyIdMap.isEmpty()){
             rollbackSecretsFromMantleService(credentialsKeyIdMap);
@@ -2007,7 +2082,7 @@ public class PCBackupServiceImpl implements PCBackupService {
         boolean resp = mantleUtils.deleteSecret(credentialKeyId);
         if (!resp) {
           log.error("Failed to delete secret credentials for objectstore endPointAddress {}",
-                    endPointAddress);
+                  endPointAddress);
         }
       }
       catch (MantleException exception) {
@@ -2023,23 +2098,23 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   protected void checkBucketAccessAndConfiguration(List<PcObjectStoreEndpoint> objectStoreEndpointList, Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap)
-      throws PCResilienceException {
+          throws PCResilienceException {
     Map<String, PCResilienceException> exceptionsMap = new ConcurrentHashMap<>();
     CompletableFuture bucketAccess = CompletableFuture.runAsync(() ->
-                                                                    bucketHandler(
-                                                                        () -> checkBucketAccessForObjectStoreEndpoints(
-                                                                            objectStoreEndpointList, objectStoreEndPointDtoMap), BUCKET_ACCESS,
-                                                                        exceptionsMap), adonisServiceThreadPool);
+            bucketHandler(
+                    () -> checkBucketAccessForObjectStoreEndpoints(
+                            objectStoreEndpointList, objectStoreEndPointDtoMap), BUCKET_ACCESS,
+                    exceptionsMap), adonisServiceThreadPool);
     CompletableFuture bucketPolicy = CompletableFuture.runAsync(() ->
-                                                                    bucketHandler(
-                                                                        () -> validateObjectStoreBucketPolicy(
-                                                                            objectStoreEndpointList, objectStoreEndPointDtoMap), BUCKET_POLICY,
-                                                                        exceptionsMap), adonisServiceThreadPool);
+            bucketHandler(
+                    () -> validateObjectStoreBucketPolicy(
+                            objectStoreEndpointList, objectStoreEndPointDtoMap), BUCKET_POLICY,
+                    exceptionsMap), adonisServiceThreadPool);
     CompletableFuture objectLock = CompletableFuture.runAsync(() ->
-                                                                  bucketHandler(
-                                                                      () -> validateObjectStoreBucketObjectLock(
-                                                                          objectStoreEndpointList, objectStoreEndPointDtoMap), OBJECT_LOCK,
-                                                                      exceptionsMap), adonisServiceThreadPool);
+            bucketHandler(
+                    () -> validateObjectStoreBucketObjectLock(
+                            objectStoreEndpointList, objectStoreEndPointDtoMap), OBJECT_LOCK,
+                    exceptionsMap), adonisServiceThreadPool);
 
     CompletableFuture<Void> bucketValidationFutures = CompletableFuture.allOf(bucketAccess, bucketPolicy, objectLock);
     try {
@@ -2073,21 +2148,20 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   protected void checkBucketAccessForObjectStoreEndpoints(List<PcObjectStoreEndpoint> objectStoreEndpointList, Map<String, ObjectStoreEndPointDto> objectStoreEndPointDtoMap)
-      throws PCResilienceException {
+          throws PCResilienceException {
     String error;
     for (PcObjectStoreEndpoint pcObjectStoreEndpoint : objectStoreEndpointList) {
       ObjectStoreEndPointDto objectStoreEndPointDto = objectStoreEndPointDtoMap.get(pcObjectStoreEndpoint.getEndpointAddress());
       if (pcObjectStoreEndpoint.getEndpointCredentials() != null) {
         // create objectStore credentials proto and objectStoreClient instance on basis of endpoint flavour
         ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-            S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
+                S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
         ObjectStoreHelper objectStoreClient = ObjectStoreHelperFactory.getObjectStoreHelper(
-            pcObjectStoreEndpoint.getEndpointFlavour()
-                                 .toString());
+                pcObjectStoreEndpoint.getEndpointFlavour()
+                        .toString());
         if (!objectStoreClient.checkBucketAccess(objectStoreEndPointDto,
-                                                 objectStoreCredentialsProto)) {
-          String bucketName = StringUtils.substringBetween(pcObjectStoreEndpoint.getEndpointAddress(),
-                  HTTP_START_REGEX, S3_REGEX);
+                objectStoreCredentialsProto)) {
+          String bucketName = pcObjectStoreEndpoint.getBucket();
           error = ErrorMessages.getObjectStoreBucketAccessErrorMessage(bucketName);
           log.error(error);
           Map<String,String> errorArguments = new HashMap<>();
@@ -2110,12 +2184,12 @@ public class PCBackupServiceImpl implements PCBackupService {
       ObjectStoreEndPointDto objectStoreEndPointDto = objectStoreEndPointDtoMap.get(pcObjectStoreEndpoint.getEndpointAddress());
       if (pcObjectStoreEndpoint.getEndpointCredentials() != null) {
         ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-            S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
+                S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
         ObjectStoreHelper objectStoreClient = ObjectStoreHelperFactory.getObjectStoreHelper(
-            pcObjectStoreEndpoint.getEndpointFlavour()
-                                 .toString());
+                pcObjectStoreEndpoint.getEndpointFlavour()
+                        .toString());
         objectStoreClient.validateObjectStoreBucketPolicy(objectStoreEndPointDto,
-                                                          objectStoreCredentialsProto,pcObjectStoreEndpoint.getBackupRetentionDays());
+                objectStoreCredentialsProto,pcObjectStoreEndpoint.getBackupRetentionDays());
       }
     }
   }
@@ -2131,13 +2205,13 @@ public class PCBackupServiceImpl implements PCBackupService {
       ObjectStoreEndPointDto objectStoreEndPointDto = objectStoreEndPointDtoMap.get(pcObjectStoreEndpoint.getEndpointAddress());
       if (pcObjectStoreEndpoint.getEndpointCredentials() != null) {
         ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-            S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
+                S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcObjectStoreEndpoint.getEndpointCredentials());
         ObjectStoreHelper objectStoreClient = ObjectStoreHelperFactory.getObjectStoreHelper(
-            pcObjectStoreEndpoint.getEndpointFlavour()
-                                 .toString());
+                pcObjectStoreEndpoint.getEndpointFlavour()
+                        .toString());
         objectStoreClient.validateObjectStoreBucketObjectLock(objectStoreEndPointDto,
-                                                               objectStoreCredentialsProto,
-            pcObjectStoreEndpoint.getBackupRetentionDays());
+                objectStoreCredentialsProto,
+                pcObjectStoreEndpoint.getBackupRetentionDays());
       }
     }
   }
@@ -2181,7 +2255,7 @@ public class PCBackupServiceImpl implements PCBackupService {
 
     //Update rpo configuration in  pc_backup_config and pc_backup_metadata
     updateEntitiesWithNewRpoConfigs(entityId,bucketName,rpoConfig,pcBackupConfig,
-        pcvmBackupTargets);
+            pcvmBackupTargets);
 
     log.info("Updated rpo config {} for bucket {}",bucketName,rpoConfig.getRpoSeconds());
   }
@@ -2195,13 +2269,13 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   private void updateEntitiesWithNewRpoConfigs(String entityId, String bucketName, RpoConfig rpoConfig,
-      PcBackupConfig pcBackupConfig, PCVMBackupTargets pcvmBackupTargets) throws PCResilienceException {
+                                               PcBackupConfig pcBackupConfig, PCVMBackupTargets pcvmBackupTargets) throws PCResilienceException {
     int oldRpo = pcBackupConfig.getRpoSecs();
     if (oldRpo != rpoConfig.getRpoSeconds()) {    // Update rpo in pc_backup_config entity in IDF
       updatePcBackupConfig(entityId, bucketName, pcBackupConfig, rpoConfig);
       // Update rpo in pc_backup_metadata config in IDF
-      updateRpoInPcBackupMetadata(bucketName, pcBackupConfig, rpoConfig,
-          pcvmBackupTargets, true, oldRpo, entityId);
+      updateRpoAndCertsInPcBackupMetadata(bucketName, pcBackupConfig, rpoConfig,
+              pcvmBackupTargets, true, oldRpo, entityId, StringUtils.EMPTY, ByteString.EMPTY);
     }
   }
 
@@ -2213,24 +2287,24 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   private void updatePcBackupConfig(String entityId, String bucketName, PcBackupConfig pcBackupConfig, RpoConfig rpoConfig)
-      throws PCResilienceException {
+          throws PCResilienceException {
 
     Map<String, Object> attributesValueMap = new HashMap<>();
     attributesValueMap.put(
-        Constants.ZPROTOBUF,
-        CompressionUtils.compress(
-            PcBackupConfig.newBuilder(pcBackupConfig)
-                .setRpoSecs(rpoConfig.getRpoSeconds())
-                .build()
-                .toByteString()
-        )
+            Constants.ZPROTOBUF,
+            CompressionUtils.compress(
+                    PcBackupConfig.newBuilder(pcBackupConfig)
+                            .setRpoSecs(rpoConfig.getRpoSeconds())
+                            .build()
+                            .toByteString()
+            )
     );
     // Construct updateEntityBuilder
     UpdateEntityArg.Builder updateEntityArgBuilder =
-        IDFUtil.constructUpdateEntityArgBuilder(
-            Constants.PC_BACKUP_CONFIG,
-            entityId ,
-            attributesValueMap);
+            IDFUtil.constructUpdateEntityArgBuilder(
+                    Constants.PC_BACKUP_CONFIG,
+                    entityId ,
+                    attributesValueMap);
     try{
       entityDBProxy.updateEntity(updateEntityArgBuilder.build());
     } catch (InsightsInterfaceException e) {
@@ -2254,23 +2328,23 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @param entityId
    * @throws PCResilienceException
    */
-  protected void updateRpoInPcBackupMetadata(String bucketName, PcBackupConfig pcBackupConfig, RpoConfig rpoConfig,
-      PCVMBackupTargets pcvmBackupTargets, boolean rollback, int oldRpo, String entityId) throws  PCResilienceException{
+  protected void updateRpoAndCertsInPcBackupMetadata(String bucketName, PcBackupConfig pcBackupConfig, RpoConfig rpoConfig,
+                                                     PCVMBackupTargets pcvmBackupTargets, boolean rollback, int oldRpo, String entityId, String certPath, ByteString certificate) throws  PCResilienceException{
     Map<String,Object> attributesValueMap = new HashMap<>();
     ObjectStoreEndpoint objectStoreEndpoint = pcBackupConfig.getObjectStoreEndpoint();
     // This should always be present.
     attributesValueMap.put(
-        Constants.PCVM_BACKUP_TARGETS,
-        CompressionUtils.compress(
-                constructPCBackupTargetsWithRpoOrCerts(objectStoreEndpoint,rpoConfig,StringUtils.EMPTY, ByteString.EMPTY, pcvmBackupTargets)
-                .toByteString()
-        )
+            Constants.PCVM_BACKUP_TARGETS,
+            CompressionUtils.compress(
+                    constructPCBackupTargetsWithRpoOrCerts(objectStoreEndpoint,rpoConfig,certPath, certificate, pcvmBackupTargets)
+                            .toByteString()
+            )
     );
     UpdateEntityArg.Builder updateMetadataEntityArgBuilder =
-        IDFUtil.constructUpdateEntityArgBuilder(
-            Constants.PC_BACKUP_METADATA,
-            instanceServiceFactory.getClusterUuidFromZeusConfig(),
-            attributesValueMap);
+            IDFUtil.constructUpdateEntityArgBuilder(
+                    Constants.PC_BACKUP_METADATA,
+                    instanceServiceFactory.getClusterUuidFromZeusConfig(),
+                    attributesValueMap);
     updateMetadataEntityArgBuilder.setFullUpdate(true);
 
     try {
@@ -2332,7 +2406,7 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @return updated PCVMBackupTargets
    */
   private PCVMBackupTargets constructPCBackupTargetsWithRpoOrCerts(ObjectStoreEndpoint objectStoreEndpoint,RpoConfig rpoConfig,
-      String certPath, ByteString certificate, PCVMBackupTargets pcvmBackupTargets) {
+                                                                   String certPath, ByteString certificate, PCVMBackupTargets pcvmBackupTargets) {
 
     //populating all the data for existing attribute names.
     PCVMBackupTargets.Builder resultTarget = PCVMBackupTargets.newBuilder();
@@ -2343,27 +2417,28 @@ public class PCBackupServiceImpl implements PCBackupService {
     List<ObjectStoreBackupTarget> objectStoreBackupTargetList = pcvmBackupTargets.getObjectStoreBackupTargetsList();
     objectStoreBackupTargetList.stream().forEach(objectStoreBackupTarget -> {
       log.debug("Comparing endpoints {} and {} to update rpo.", objectStoreBackupTarget.getEndpointAddress(),objectStoreEndpoint.getEndpointAddress());
-      ObjectStoreBackupTarget.Builder backupTarget = ObjectStoreBackupTarget.newBuilder(objectStoreBackupTarget)
+      ObjectStoreBackupTarget.Builder backupTarget = PCVMBackupTargets.ObjectStoreBackupTarget.newBuilder(objectStoreBackupTarget)
               .setEndpointAddress(objectStoreBackupTarget.getEndpointAddress())
               .setLastSyncTimestamp(objectStoreBackupTarget.getLastSyncTimestamp())
               .setEndpointFlavour(ObjectStoreBackupTarget.EndpointFlavour
                       .valueOf(objectStoreEndpoint.getEndpointFlavour().name()));
-      if (!StringUtils.isEmpty(certPath)){
+      if (!StringUtils.isEmpty(certPath)) {
         String updatedCertPath = StringUtils.equals(objectStoreBackupTarget.getEndpointAddress(),
-                objectStoreEndpoint.getEndpointAddress())  ? certPath : objectStoreBackupTarget.getCertificatePath();
+                objectStoreEndpoint.getEndpointAddress()) ? certPath : objectStoreBackupTarget.getCertificatePath();
         ByteString updatedCertificate = StringUtils.equals(objectStoreBackupTarget.getEndpointAddress(),
-                objectStoreEndpoint.getEndpointAddress())  ? certificate: objectStoreBackupTarget.getCertificateContent();
+                objectStoreEndpoint.getEndpointAddress()) ? certificate : objectStoreBackupTarget.getCertificateContent();
         if (!ObjectUtils.isEmpty(updatedCertPath)) {
           backupTarget.setCertificatePath(updatedCertPath).setCertificateContent(updatedCertificate).build();
         }
-      } else {
+      }
+      if (!ObjectUtils.isEmpty(rpoConfig.getRpoSeconds()) && rpoConfig.getRpoSeconds() != 0){
         int rpoSeconds = StringUtils.equals(objectStoreBackupTarget.getEndpointAddress(),
                 objectStoreEndpoint.getEndpointAddress())  ? rpoConfig.getRpoSeconds() : objectStoreBackupTarget.getRpoSecs();
         backupTarget.setRpoSecs(rpoSeconds);
       }
       resultTarget.addObjectStoreBackupTargets(backupTarget);
     });
-   return resultTarget.build();
+    return resultTarget.build();
   }
 
   /**
@@ -2376,12 +2451,12 @@ public class PCBackupServiceImpl implements PCBackupService {
   public PcBackupConfig getBackupTargetById(String backupTargetID) throws PCResilienceException {
 
     PcBackupConfig pcBackupConfig =
-        pcRetryHelper.fetchPCBackupConfigWithEntityId(backupTargetID);
+            pcRetryHelper.fetchPCBackupConfigWithEntityId(backupTargetID);
     // If both cluster uuid and object store endpoint are not present that
     // means pc backup config is empty and there is no replica present to
     // remove.
     if (pcBackupConfig != null && !(pcBackupConfig.hasClusterUuid() ||
-        pcBackupConfig.hasObjectStoreEndpoint())) {
+            pcBackupConfig.hasObjectStoreEndpoint())) {
       Map<String,String> errorArguments = new HashMap<>();
       errorArguments.put(ErrorCodeArgumentMapper.ARG_BACKUP_TARGET_EXT_ID,backupTargetID);
       throw new PCResilienceException(ErrorMessages.BACKUP_TARGET_WITH_ENTITY_ID_NOT_FOUND,
@@ -2398,12 +2473,12 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   @Override
   public void updateCredentials(String entityId, PcEndpointCredentials pcEndpointCredentials)
-      throws PCResilienceException {
+          throws PCResilienceException {
 
     //Get endpoint Address for the given entityId from IDF (pc_backup_config)
     PcBackupConfig pcBackupConfig = PcBackupConfig.getDefaultInstance();
     pcBackupConfig = PCUtil.getPcBackupConfigById(entityId, pcRetryHelper);
-    ObjectStoreEndpoint objectStoreEndpoint = pcBackupConfig.getObjectStoreEndpoint();
+    PcBackupConfig.ObjectStoreEndpoint objectStoreEndpoint = pcBackupConfig.getObjectStoreEndpoint();
 
     String clusterUuid = instanceServiceFactory.getClusterUuidFromZeusConfig();
     ObjectStoreEndPointDto objectStoreEndPointDto = S3ObjectStoreUtil.getS3EndpointDTOFromObjectStoreEndpoint(objectStoreEndpoint, entityId, clusterUuid, entityDBProxy);
@@ -2423,9 +2498,8 @@ public class PCBackupServiceImpl implements PCBackupService {
                 PCUtil.getObjectStoreEndpointUuid(instanceServiceFactory.getClusterUuidFromZeusConfig(),
                         objectStoreEndpoint.getEndpointAddress()) + PCBR_OBJECTSTORE_CERTS_EXTENSION;
       }
-      certificate = CertificatesUtility.normalizeCertificateContent(pcEndpointCredentials.getCertificate());
+      certificate = CertificatesUtility.normalizeAndValidateCertificateContent(pcEndpointCredentials.getCertificate());
       objectStoreEndPointDto.setCertificatePath(certPath);
-      CertificatesUtility.validateCertificates(certificate);
       objectStoreEndPointDto.setCertificateContent(certificate);
     } else {
       validate(pcEndpointCredentials);
@@ -2458,8 +2532,8 @@ public class PCBackupServiceImpl implements PCBackupService {
 
     if (!ObjectUtils.isEmpty(pcEndpointCredentials) && !ObjectUtils.isEmpty(pcEndpointCredentials.getCertificate())) {
       certFileUtil.createCertFileOnAllPCVM(Arrays.asList(objectStoreEndPointDto), false);
-      encodedCert = ByteString.copyFrom(Base64.getEncoder().encode(
-          objectStoreEndPointDto.getCertificateContent().getBytes()));
+      encodedCert = CertificatesUtility.getCertificateByteStringFromString(
+              objectStoreEndPointDto.getCertificateContent());
     }
 
     PCVMBackupTargets pcvmBackupTargets = pcvmDataService.fetchPcvmBackupTargets();
@@ -2485,11 +2559,11 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   public String writeSecret(String bucketName,
-      PcEndpointCredentials pcEndpointCredentials) throws PCResilienceException{
+                            PcEndpointCredentials pcEndpointCredentials) throws PCResilienceException{
     String credentialKey;
     try {
       ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-          S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcEndpointCredentials);
+              S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(pcEndpointCredentials);
       // write secrets into mantle
       credentialKey = mantleUtils.writeSecret(objectStoreCredentialsProto);
 
@@ -2512,13 +2586,13 @@ public class PCBackupServiceImpl implements PCBackupService {
       boolean resp = mantleUtils.deleteSecret(credentialKeyId);
       if (!resp) {
         String error = String.format("Failed to delete existing secret credentials for bucket: %s",
-            bucketName);
+                bucketName);
         log.warn(error);
       }
     }
     catch (MantleException exception) {
       String error = String.format("Error occurred while deleting secret for bucket : "
-          + "%s with credential keyID %s", bucketName,credentialKeyId);
+              + "%s with credential keyID %s", bucketName,credentialKeyId);
       log.warn("{}",error,exception);
     }
   }
@@ -2530,24 +2604,24 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   private void checkBucketAccess(String bucketName, ObjectStoreEndpoint objectStoreEndpoint, ObjectStoreEndPointDto objectStoreEndPointDto, PcEndpointCredentials newEndpointCredentials)
-      throws PCResilienceException {
+          throws PCResilienceException {
 
-      validate(newEndpointCredentials);
-      // create objectStore credentials proto and objectStoreClient instance on basis of endpoint flavour
-      ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
-          S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(newEndpointCredentials);
-      ObjectStoreHelper objectStoreClient = ObjectStoreHelperFactory.getObjectStoreHelper(
-          objectStoreEndpoint.getEndpointFlavour()
-              .toString());
-      if (!objectStoreClient.checkBucketAccess(objectStoreEndPointDto,
-          objectStoreCredentialsProto)) {
-        String error =  ErrorMessages.getObjectStoreBucketAccessErrorMessage(bucketName);
-        log.error(error);
-        Map<String,String> errorArguments = new HashMap<>();
-        errorArguments.put(ErrorCodeArgumentMapper.ARG_BUCKET_NAME,bucketName);
-        throw new PCResilienceException(error, ErrorCode.PCBR_BUCKET_ACCESS_OR_CREDENTIAL_FAILURE,
-                HttpStatus.BAD_REQUEST,errorArguments);
-      }
+    validate(newEndpointCredentials);
+    // create objectStore credentials proto and objectStoreClient instance on basis of endpoint flavour
+    ClusterExternalStateProto.ObjectStoreCredentials objectStoreCredentialsProto =
+            S3ServiceUtil.getCredentialsProtoFromEndpointCredentials(newEndpointCredentials);
+    ObjectStoreHelper objectStoreClient = ObjectStoreHelperFactory.getObjectStoreHelper(
+            objectStoreEndpoint.getEndpointFlavour()
+                    .toString());
+    if (!objectStoreClient.checkBucketAccess(objectStoreEndPointDto,
+            objectStoreCredentialsProto)) {
+      String error =  ErrorMessages.getObjectStoreBucketAccessErrorMessage(bucketName);
+      log.error(error);
+      Map<String,String> errorArguments = new HashMap<>();
+      errorArguments.put(ErrorCodeArgumentMapper.ARG_BUCKET_NAME,bucketName);
+      throw new PCResilienceException(error, ErrorCode.PCBR_BUCKET_ACCESS_OR_CREDENTIAL_FAILURE,
+              HttpStatus.BAD_REQUEST,errorArguments);
+    }
   }
 
   /**
@@ -2557,8 +2631,8 @@ public class PCBackupServiceImpl implements PCBackupService {
    */
   private void validate(PcEndpointCredentials pcEndpointCredentials) throws PCResilienceException {
     if (!ObjectUtils.isEmpty(pcEndpointCredentials) && (
-        StringUtils.isEmpty(pcEndpointCredentials.getAccessKey()) ||
-            StringUtils.isEmpty(pcEndpointCredentials.getSecretAccessKey()))) {
+            StringUtils.isEmpty(pcEndpointCredentials.getAccessKey()) ||
+                    StringUtils.isEmpty(pcEndpointCredentials.getSecretAccessKey()))) {
       log.error("AccessKey or Secret AccessKey cannot be empty");
       throw new PCResilienceException(ErrorMessages.EMPTY_CREDENTIAL_KEY_ERROR,
               ErrorCode.PCBR_INVALID_BUCKET_DETAILS, HttpStatus.BAD_REQUEST);
@@ -2573,8 +2647,8 @@ public class PCBackupServiceImpl implements PCBackupService {
    * @throws PCResilienceException
    */
   private void updateCredentialsInPcBackupConfigWithRollback(String entityId, String keyId, String bucketName, String certPath,
-      PcBackupConfig pcBackupConfig, PCVMBackupTargets pcvmBackupTargets)
-      throws PCResilienceException {
+                                                             PcBackupConfig pcBackupConfig, PCVMBackupTargets pcvmBackupTargets)
+          throws PCResilienceException {
 
     Map<String, Object> attributesValueMap = new HashMap<>();
     ObjectStoreEndpoint.Builder builder = ObjectStoreEndpoint.newBuilder(pcBackupConfig.getObjectStoreEndpoint());
@@ -2585,28 +2659,28 @@ public class PCBackupServiceImpl implements PCBackupService {
       builder.setCertificatePath(certPath);
     }
     attributesValueMap.put(
-        Constants.ZPROTOBUF,
-        CompressionUtils.compress(
-            PcBackupConfig.newBuilder(pcBackupConfig)
-                .setCredentialsModifiedTimestampUsecs(Instant.now().toEpochMilli() * 1000)
-                .setObjectStoreEndpoint(builder.build())
-                .build()
-                .toByteString()
-        )
+            Constants.ZPROTOBUF,
+            CompressionUtils.compress(
+                    PcBackupConfig.newBuilder(pcBackupConfig)
+                            .setCredentialsModifiedTimestampUsecs(Instant.now().toEpochMilli() * 1000)
+                            .setObjectStoreEndpoint(builder.build())
+                            .build()
+                            .toByteString()
+            )
     );
     // Construct update query
     UpdateEntityArg.Builder updateEntityArgBuilder =
-        IDFUtil.constructUpdateEntityArgBuilder(
-            Constants.PC_BACKUP_CONFIG,
-            entityId ,
-            attributesValueMap);
+            IDFUtil.constructUpdateEntityArgBuilder(
+                    Constants.PC_BACKUP_CONFIG,
+                    entityId ,
+                    attributesValueMap);
     try{
       entityDBProxy.updateEntity(updateEntityArgBuilder.build());
     } catch (InsightsInterfaceException e) {
       Map<String,String> errorArguments = new HashMap<>();
       String error;
       if (!StringUtils.isEmpty(certPath)){
-        ObjectStoreBackupTarget objectStoreBackupTarget = pcvmDataService.getObjectStoreBackupTargetByEntityId(pcvmBackupTargets, entityId);
+        PCVMBackupTargets.ObjectStoreBackupTarget objectStoreBackupTarget = pcvmDataService.getObjectStoreBackupTargetByEntityId(pcvmBackupTargets, entityId);
         updateCertsInPcBackupMetadata(bucketName, pcBackupConfig, objectStoreBackupTarget.getCertificatePath(), objectStoreBackupTarget.getCertificateContent(), pcvmBackupTargets);
       }
       if (!StringUtils.isEmpty(keyId)) {
@@ -2615,17 +2689,21 @@ public class PCBackupServiceImpl implements PCBackupService {
       error = ErrorMessages.getBucketUpdateCredentialErrorMessage(bucketName);
       errorArguments.put(ErrorCodeArgumentMapper.ARG_BUCKET_NAME,bucketName);
       throw new PCResilienceException(error, ErrorCode.PCBR_UPDATE_BUCKET_CREDENTIALS_FAILURE,
-                HttpStatus.INTERNAL_SERVER_ERROR,errorArguments);
+              HttpStatus.INTERNAL_SERVER_ERROR,errorArguments);
     }
   }
 
   protected void updateRpoAndCredentialsInPcBackupConfigWithRollback(String entityId, String keyId, String bucketName,
-                                                 PcBackupConfig pcBackupConfig, RpoConfig rpoConfig, PCVMBackupTargets pcvmBackupTargets)
+                                                                     PcBackupConfig pcBackupConfig, RpoConfig rpoConfig, PCVMBackupTargets pcvmBackupTargets,
+                                                                     String certPath, ByteString certificate)
           throws PCResilienceException {
 
     Map<String, Object> attributesValueMap = new HashMap<>();
     ObjectStoreEndpoint.Builder builder = ObjectStoreEndpoint.newBuilder(pcBackupConfig.getObjectStoreEndpoint());
     builder.setCredentialsKeyId(keyId);
+    if (!ObjectUtils.isEmpty(certPath)) {
+      builder.setCertificatePath(certPath);
+    }
     attributesValueMap.put(
             Constants.ZPROTOBUF,
             CompressionUtils.compress(
@@ -2650,8 +2728,9 @@ public class PCBackupServiceImpl implements PCBackupService {
       String error = ErrorMessages.getBucketUpdateCredentialErrorMessage(bucketName);
       log.error(error, e);
       try{
-        updateRpoInPcBackupMetadata(bucketName, pcBackupConfig, new RpoConfig(pcBackupConfig.getRpoSecs()),
-                pcvmBackupTargets, false, 0, StringUtils.EMPTY);
+        ObjectStoreBackupTarget objectStoreBackupTarget = pcvmDataService.getObjectStoreBackupTargetByEntityId(pcvmBackupTargets, entityId);
+        updateRpoAndCertsInPcBackupMetadata(bucketName, pcBackupConfig, new RpoConfig(pcBackupConfig.getRpoSecs()),
+                pcvmBackupTargets, false, 0, StringUtils.EMPTY, objectStoreBackupTarget.getCertificatePath(), objectStoreBackupTarget.getCertificateContent());
       } catch (Exception ex){
         log.warn("Unable to rollback pc backup metadata for bucket {}",bucketName);
       }
@@ -2688,9 +2767,9 @@ public class PCBackupServiceImpl implements PCBackupService {
   private ObjectStoreCredentialsBackupEntity getObjectStoreCredentialsBackupEntityInPCBackupConfig(
           List<PcObjectStoreEndpoint> pcObjectStoreEndpointList) throws PCResilienceException {
     ObjectStoreCredentialsBackupEntity objectStoreCredentialsBackupEntityInPcBackupConfig =
-        pcRetryHelper.fetchExistingObjectStoreEndpointInPCBackupConfigWithCredentials();
+            pcRetryHelper.fetchExistingObjectStoreEndpointInPCBackupConfigWithCredentials();
     List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig =
-        objectStoreCredentialsBackupEntityInPcBackupConfig.getObjectStoreEndpoints();
+            objectStoreCredentialsBackupEntityInPcBackupConfig.getObjectStoreEndpoints();
 
     log.info("Object store endpoints from backup config  - {}",
             objectStoreEndpointInPCBackupConfig);
@@ -2718,7 +2797,7 @@ public class PCBackupServiceImpl implements PCBackupService {
     ObjectStoreCredentialsBackupEntity objectStoreCredentialsBackupEntityInPCBackupConfig =
             getObjectStoreCredentialsBackupEntityInPCBackupConfig(pcObjectStoreEndpointList);
     List<PcObjectStoreEndpoint> objectStoreEndpointInPCBackupConfig
-        = objectStoreCredentialsBackupEntityInPCBackupConfig.getObjectStoreEndpoints();
+            = objectStoreCredentialsBackupEntityInPCBackupConfig.getObjectStoreEndpoints();
 
     if (peClusterUuidSet.isEmpty() && pcObjectStoreEndpointList.isEmpty()) {
       String errorMessage = "Nothing to add in pc_backup_config table. " +
@@ -2765,16 +2844,19 @@ public class PCBackupServiceImpl implements PCBackupService {
       return clusterHelper.generateEtagForBackupTarget(backupTargetDTO);
     } else {
       ObjectStoreLocation objectStoreLocation = (ObjectStoreLocation) backupTarget.getLocation();
-      String credentialId = getBackupTargetCredentialId(backupTarget);
-      backupTargetDTO = getBackupTargetDtoForObjectStore(objectStoreLocation, credentialId);
+      ClusterExternalStateProto.PcBackupConfig pcBackupConfig = getBackupTargetById(backupTarget.getExtId());
+      String credentialId = pcBackupConfig.getObjectStoreEndpoint().getCredentialsKeyId();
+      String certificatePath = pcBackupConfig.getObjectStoreEndpoint().getCertificatePath();
+
+      backupTargetDTO = getBackupTargetDtoForObjectStore(objectStoreLocation, credentialId, certificatePath);
       ObjectStoreHelper objectStoreHelper = ObjectStoreHelperFactory
               .getObjectStoreHelper(S3ServiceUtil.getObjectStoreEndpointFlavour(objectStoreLocation).toString());
       return objectStoreHelper.generateEtagForBackupTarget(backupTargetDTO);
-
     }
   }
 
-  private BackupTargetDTO getBackupTargetDtoForObjectStore(ObjectStoreLocation objectStoreLocation, String credentialKeyId){
+  private BackupTargetDTO getBackupTargetDtoForObjectStore(ObjectStoreLocation objectStoreLocation, String credentialKeyId,
+                                                           String certificatePath) {
 
     BackupTargetDTO backupTargetDTO = new BackupTargetDTO();
     if (objectStoreLocation.getProviderConfig() instanceof AWSS3Config ){
@@ -2783,6 +2865,19 @@ public class PCBackupServiceImpl implements PCBackupService {
       backupTargetDTO.setRegion(awss3Config.getRegion());
       backupTargetDTO.setCredentialKeyId(credentialKeyId);
       backupTargetDTO.setRpoInMinutes(objectStoreLocation.getBackupPolicy().getRpoInMinutes());
+    } else if (objectStoreLocation.getProviderConfig() instanceof NutanixObjectsConfig) {
+      NutanixObjectsConfig nutanixObjectsConfig = (NutanixObjectsConfig) objectStoreLocation.getProviderConfig();
+      backupTargetDTO.setBucketName(nutanixObjectsConfig.getBucketName());
+      backupTargetDTO.setRegion(nutanixObjectsConfig.getRegion());
+      backupTargetDTO.setCredentialKeyId(credentialKeyId);
+      backupTargetDTO.setIpAddressOrHostname(
+              prismCentralBackupConverter.getStringFromIPAddressOrFQDN(
+                      nutanixObjectsConfig.getConnectionConfig().getIpAddressOrHostname()));
+      backupTargetDTO.setRpoInMinutes(objectStoreLocation.getBackupPolicy().getRpoInMinutes());
+      backupTargetDTO.setSkipCertificateValidation(nutanixObjectsConfig.getConnectionConfig().getShouldSkipCertificateValidation());
+      if (!ObjectUtils.isEmpty(certificatePath)) {
+        backupTargetDTO.setCertificatePath(certificatePath);
+      }
     }
     return backupTargetDTO;
   }
@@ -2790,7 +2885,7 @@ public class PCBackupServiceImpl implements PCBackupService {
   private String getBackupTargetCredentialId(BackupTarget backupTarget)
           throws PCResilienceException {
 
-    PcBackupConfig pcBackupConfig = null;
+    ClusterExternalStateProto.PcBackupConfig pcBackupConfig = null;
     pcBackupConfig = getBackupTargetById(backupTarget.getExtId());
     return pcBackupConfig.getObjectStoreEndpoint().getCredentialsKeyId();
   }

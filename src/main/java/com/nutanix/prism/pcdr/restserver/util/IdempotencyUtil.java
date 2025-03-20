@@ -33,27 +33,31 @@ public class IdempotencyUtil {
 
   private final IdempotencySupportService idempotencySupportService;
 
+  private final GrpcAuthUtils grpcAuthUtils;
+
   @Autowired
-  public IdempotencyUtil(final IdempotencySupportService idempotencySupportService) {
+  public IdempotencyUtil(final IdempotencySupportService idempotencySupportService, GrpcAuthUtils grpcAuthUtils) {
     this.idempotencySupportService = idempotencySupportService;
+    this.grpcAuthUtils = grpcAuthUtils;
   }
 
    /**
      * Fetch existing task info from api utils for the request id.
      * @param requestId
-     * @param userId
      * @return taskId.
     * @throws IdempotencySupportException,PCResilienceException
    */
   @Retryable(value = IdempotencySupportException.class, maxAttempts = DEFAULT_NUM_RETRIES,
           backoff = @Backoff(delay = DEFAULT_RETRY_DELAY_MILLISECONDS))
-  public String getIdempotentTaskInfo(final String requestId, final String userId)
+  public String getIdempotentTaskInfo(final String requestId)
           throws IdempotencySupportException, PCResilienceException {
 
     if (requestId == null || requestId.trim().isEmpty()) {
      throw new PCResilienceException(ErrorMessages.MISSING_REQUEST_ID,
               ErrorCode.PCBR_HEADER_NTNX_REQUEST_ID_NOT_FOUND, HttpStatus.BAD_REQUEST);
     }
+
+    String userId = grpcAuthUtils.getUserUuid();
 
     if (userId == null || userId.trim().isEmpty()) {
       throw new PCResilienceException(ErrorMessages.MISSING_USER_ID,
